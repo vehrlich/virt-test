@@ -66,16 +66,6 @@ def print_rv_version(client_session, rv_binary):
             client_session.cmd(rv_binary + " --spice-gtk-version"))
 
 
-def killall(client_session, pth):
-    """
-    calls killall execname
-    @params client_session
-    @params pth - path or execname
-    """
-    execname = pth.split(os.path.sep)[-1]
-    client_session.cmd("killall %s &> /dev/null" % execname, ok_status=[0, 1])
-
-
 def launch_rv(client_vm, guest_vm, params):
     """
     Launches rv_binary with args based on spice configuration
@@ -162,12 +152,11 @@ def launch_rv(client_vm, guest_vm, params):
     logging.info("Launching %s on the client (virtual)", cmd)
     client_session.cmd(cmd)
 
+    utils_spice.wait_timeout(5)  # Wait for concetion to establish
     # client waits for user entry (authentication) if spice_password is set
     if ticket:
-        utils_spice.wait_timeout(5)  # Wait for remote-viewer to launch
         send_ticket(client_vm, ticket)
 
-    utils_spice.wait_timeout(5)  # Wait for conncetion to establish
     verify_established(client_session, host_ip, host_port, rv_binary)
 
     #prevent from kill remote-viewer after test finish
