@@ -37,12 +37,13 @@ variants:
         variants:
             - @no_ssl:
                 spice_ssl = no
-                spice_port = 3000
+                spice_port = generate
             - bad_port:
                 spice_port = -1
             - ssl:
                 spice_ssl = yes
-                spice_tls_port = 3200
+                spice_port = generate
+                spice_tls_port = generate
                 spice_tls_ciphers = DEFAULT
                 spice_gen_x509 = yes
                 spice_x509_dir = yes
@@ -135,69 +136,139 @@ variants:
             -default_ipv:
                 spice_ipv4=no
                 spice_ipv6=no
+
 variants:
 
-    - qemu_kvm_rhel63_install_client:
-        # Use this only when you need to create rhel63 image qcow
+    - @qemu_kvm_install_client:
         qemu_binary = /usr/libexec/qemu-kvm
         qemu_img_binary = /usr/bin/qemu-img
         qemu_io_binary = /usr/bin/qemu-io
-        image_name = images/rhel63-64_client
         only qcow2
-        only rtl8139
+        only e1000
         only ide
         only smp2
         only no_9p_export
         only no_pci_assignable
         only smallpages
-        only Linux.RHEL.6.3.x86_64
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        only unattended_install.cdrom.extra_cdrom_ks
 
-    # Runs qemu-kvm Windows guest install
-    - @qemu_kvm_windows_install_guest:
-        # We want qemu-kvm for this run
-        qemu_binary = /usr/libexec/qemu-kvm
-        qemu_img_binary = /usr/bin/qemu-img
-        qemu_io_binary = /usr/bin/qemu-io
-        # Only qcow2 file format
-        only qcow2
-        # Only rtl8139 for nw card (default on qemu-kvm)
-        only rtl8139
-        # Only ide hard drives
-        only ide
-        # qemu-kvm will start only with -smp 2 (2 processors)
-        only smp2
-        # Disable 9p export by default
-        only no_9p_export
-        # No PCI assignable devices
-        only no_pci_assignable
-        # No large memory pages
-        only smallpages
-        # Operating system choice
-        only Win7.64.sp1
-        # Subtest choice. You can modify that line to add more subtests
-        only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        only unattended_install.cdrom
+        variants:
+            - RHEL:
+                only unattended_install.cdrom.extra_cdrom_ks
+                variants:
+                    - 6.3.86_x64:
+                        only Linux.RHEL.6.3.x86_64
+                    - 6.4.86_x64:
+                        only Linux.RHEL.6.4.x86_64
 
+            - Fedora:
+                only unattended_install.cdrom.extra_cdrom_ks
+                variants:
+                    - 17.64:
+                        unattended_file = unattended/Fedora-17-spice.ks
+                        only Linux.Fedora.17.64
 
-    - qemu_kvm_rhel63_install_guest:
-        # Use this only when you need to create rhel63 image qcow
+            - Windows:
+                variants:
+                    - Win7:
+                        variants:
+                            - 64:
+                                variants:
+                                    - @sp0:
+                                    - sp1:
+                                        only Win7.64.sp1
+                                        only unattended_install.cdrom
+
+    - @qemu_kvm_install_guest:
         qemu_binary = /usr/libexec/qemu-kvm
         qemu_img_binary = /usr/bin/qemu-img
         qemu_io_binary = /usr/bin/qemu-io
         only qcow2
-        only rtl8139
         only ide
         only smp2
         only no_9p_export
         only no_pci_assignable
         only smallpages
-        only Linux.RHEL.6.3.x86_64
+        only e1000
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        only unattended_install.cdrom.extra_cdrom_ks
 
-    - @remote_viewer_rhel63ssl:
+        variants:
+            - RHEL:
+                variants:
+                    - 6.3.86_x64:
+                        only Linux.RHEL.6.3.x86_64
+                        only unattended_install.cdrom.extra_cdrom_ks
+            - Fedora:
+                variants:
+                    - 17.64:
+                        unattended_file = unattended/Fedora-17-spice.ks
+                        only Linux.Fedora.17.64
+                        only unattended_install.cdrom.extra_cdrom_ks
+            - Windows:
+                variants:
+                    - Win7:
+                        variants:
+                            - 64:
+                                variants:
+                                    - @sp0:
+                                    - sp1:
+                                        only Win7.64.sp1
+                                        only unattended_install.cdrom
+
+    - @spice_rv_connect:
+        qemu_binary = /usr/libexec/qemu-kvm
+        qemu_img_binary = /usr/bin/qemu-img
+        qemu_io_binary = /usr/bin/qemu-io
+        used_mem = 1024
+        kill_vm = no
+        only qcow2
+        only e1000
+        only ide
+        only up
+        only no_9p_export
+        only no_pci_assignable
+        only smallpages
+
+        variants:
+            - RHEL:
+                rv_binary = /usr/bin/remote-viewer
+                variants:
+                    - @default:
+                    - 6.3.x86_64:
+                        only Linux.RHEL.6.3.x86_64
+                        only rv_connect.RHEL.6.3.x86_64
+                    - 6.3.i386:
+                        only Linux.RHEL.6.3.x86_32
+                        only rv_connect.RHEL.6.3.x86_32
+
+            - Fedora:
+                rv_binary = /usr/bin/remote-viewer
+                variants:
+                    - @default:
+                    - 17.64:
+                        only Linux.Fedora.17.64
+                        only rv_connect.Fedora.17.64
+
+            #- Windows:
+            #TODO not working for now
+            #    variants:
+            #        - Win7:
+            #            variants:
+            #                - 64:
+            #                    variants:
+            #                        - @sp0:
+            #                        - sp1:
+            #                            only Windows.Win7.64.sp1
+            #                            only rv_connect.Windows
+
+        variants:
+            - @default:
+            - no_ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.ssl.key_password.password.dcp_off.1monitor
+
+    - @spice_negative_qemu:
         qemu_binary = /usr/libexec/qemu-kvm
         qemu_img_binary = /usr/bin/qemu-img
         qemu_io_binary = /usr/bin/qemu-io
@@ -210,72 +281,22 @@ variants:
         only no_pci_assignable
         only smallpages
         only Linux.RHEL.6.3.x86_64
-        only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.ssl.key_password.password.dcp_off.1monitor
-        only rv_connect.RHEL.6.3.x86_64, shutdown
 
-    - @remote_viewer_rhel63_quick:
-        qemu_binary = /usr/libexec/qemu-kvm
-        qemu_img_binary = /usr/bin/qemu-img
-        qemu_io_binary = /usr/bin/qemu-io
-        rv_binary = /usr/bin/remote-viewer
-        only qcow2
-        only e1000
-        only ide
-        only up
-        only no_9p_export
-        only no_pci_assignable
-        only smallpages
-        only Linux.RHEL.6.3.x86_64
-        only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        only rv_connect.RHEL.6.3.x86_64, shutdown
+        variants:
+            - badic:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.bad_ic.no_ssl.no_password.dcp_off.1monitor
+            - badjpegwc:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.bad_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - badzlib:
+                only spice.default_ipv.default_pc.default_sv.bad_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - badsv:
+                only spice.default_ipv.default_pc.bad_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - badport:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.bad_port.no_password.dcp_off.1monitor
+            - badpc:
+                only spice.default_ipv.bad_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
 
-    - @remote_viewer_win_guest_quick:
-        qemu_binary = /usr/libexec/qemu-kvm
-        qemu_img_binary = /usr/bin/qemu-img
-        qemu_io_binary = /usr/bin/qemu-io
-        rv_binary = /usr/bin/remote-viewer
-        only qcow2
-        only e1000
-        only ide
-        only up
-        only no_9p_export
-        only no_pci_assignable
-        only smallpages
-        only Win7.64.sp1
-        only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        #rv_connect_win is specifically a test meant for a windows guest and a rhel client, rv_connect cannot be used.
-        only rv_connect_win.RHEL.6.3.x86_64, shutdown
-
-    - @spice_negative_rhel63:
-        qemu_binary = /usr/libexec/qemu-kvm
-        qemu_img_binary = /usr/bin/qemu-img
-        qemu_io_binary = /usr/bin/qemu-io
-        rv_binary = /usr/bin/remote-viewer
-        only qcow2
-        only e1000
-        only ide
-        only up
-        only no_9p_export
-        only no_pci_assignable
-        only smallpages
-        only Linux.RHEL.6.3.x86_64
         only negative_create
-
-    - @rv_disconnect_rhel63:
-        qemu_binary = /usr/libexec/qemu-kvm
-        qemu_img_binary = /usr/bin/qemu-img
-        qemu_io_binary = /usr/bin/qemu-io
-        rv_binary = /usr/bin/remote-viewer
-        only qcow2
-        only e1000
-        only ide
-        only up
-        only no_9p_export
-        only no_pci_assignable
-        only smallpages
-        only Linux.RHEL.6.3.x86_64
-        only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-        only rv_connect.RHEL.6.3.x86_64, rv_disconnect.RHEL.6.3.x86_64, shutdown
 
     - @rv_fullscreen_rhel63:
         qemu_binary = /usr/libexec/qemu-kvm
@@ -292,7 +313,6 @@ variants:
         only Linux.RHEL.6.3.x86_64
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
         only fullscreen_setup.RHEL.6.3.x86_64, rv_connect.RHEL.6.3.x86_64, rv_fullscreen.RHEL.6.3.x86_64, shutdown
-
 
     - @rv_copyandpaste_rhel63:
         qemu_binary = /usr/libexec/qemu-kvm
@@ -342,12 +362,76 @@ variants:
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
         only rv_connect.RHEL.6.3.x86_64, rv_input.RHEL.6.3.x86_64, shutdown
 
+    -@kill_app:
+        qemu_binary = /usr/libexec/qemu-kvm
+        qemu_img_binary = /usr/bin/qemu-img
+        qemu_io_binary = /usr/bin/qemu-io
+        only qcow2
+        only e1000
+        only ide
+        only up
+        only no_9p_export
+        only no_pci_assignable
+        only smallpages
+
+        variants:
+            - RHEL:
+                variants:
+                    - @default:
+                    - 6.3.x86_64:
+                        only Linux.RHEL.6.3.x86_64
+                        only kill_application.RHEL.6.3.x86_64
+                    - 6.3.i386:
+                        only Linux.RHEL.6.3.i386
+                        only kill_application.RHEL.6.3.i386
+
+            - Fedora:
+                variants:
+                    - @default:
+                    - 17.64:
+                        only Linux.Fedora.17.64
+                        only kill_application.Fedora.17.64
+
+            - Windows:
+                variants:
+                    - Win7:
+                        variants:
+                            - 64:
+                                only Win7.64.sp1
+                                only kill_application.Windows.RHEL.6.3.x86_64
+
+        variants:
+            - @default:
+            - no_ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.ssl.key_password.password.dcp_off.1monitor
+
+        variants:
+        #shutdown or leave VM running after app kill
+            - shutdown:
+                kill_vm = yes
+                kill_vm_gracefully = yes
+            - no_shutdown:
+                kill_vm = no
+                kill_vm_gracefully = no
+
+        variants:
+        #variant for what app is needed to kill (and where)
+            - remote-viewer:
+                kill_app_name = "remote-viewer"
+                kill_on_vms = "client_vm"
+
+            - totem:
+                kill_app_name = "totem"
+                kill_on_vms = "client_vm"
+
 variants:
     #The following are all the individual tests for spice
-    - Create_VMs:
-        only qemu_kvm_rhel63_install_guest, qemu_kvm_rhel63_install_client
-    - Install_Win_Guest:
-        only qemu_kvm_windows_install_guest
+    - Create_Client_VMs:
+        only qemu_kvm_install_client.RHEL.6.3.86_x64, qemu_kvm_install_client.Fedora.17.64, qemu_kvm_install_client.Windows.Win7.64.sp1
+    - Create_Guest_VMs:
+        only qemu_kvm_install_guest.RHEL.6.3.86_x64, qemu_kvm_install_client.Fedora.17.64, qemu_kvm_install_guest.Windows.Win7.64.sp1
     - Negative_QEMU_Spice_Launch_badport:
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.bad_port.no_password.dcp_off.1monitor
         only spice_negative_rhel63
@@ -367,7 +451,9 @@ variants:
         only spice.default_ipv.bad_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
         only spice_negative_rhel63
     - Remote_Viewer_Test:
-        only remote_viewer_rhel63_quick
+        only spice_rv_connect.no_ssl.RHEL.6.3.x86_64, kill_app.remote-viewer.shutdown.no_ssl.RHEL.6.3.x86_64
+    - Remote_Viewer_SSL_Test:
+        only spice_rv_connect.ssl.RHEL.6.3.x86_64, kill_app.remote-viewer.no_shutdown.ssl.RHEL.6.3.x86_64
     - Remote_Viewer_FullScreen_Test:
         full_screen = yes
         only rv_fullscreen_rhel63
@@ -375,11 +461,9 @@ variants:
         full_screen = no
         only rv_fullscreen_rhel63
     - Remote_Viewer_WinGuest_Test:
+        #TODO update this as Remote_VIewer_test
+        #only spice_rv_connect.no_ssl.Windows.Win7.64.sp1, kill_app.remote-viewer.shutdown.no_ssl.Windows.Win7.64.sp1
         only remote_viewer_win_guest_quick
-    - Remote_Viewer_Disconnect_Test:
-        only rv_disconnect_rhel63
-    - Remote_Viewer_SSL_Test:
-        only remote_viewer_rhel63ssl
     - Copy_Client_to_Guest_POS:
         config_test = "positive_client_to_guest"
         only rv_copyandpaste_rhel63
