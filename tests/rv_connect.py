@@ -135,7 +135,7 @@ def launch_rv(client_vm, guest_vm, params):
 
     # Launching the actual set of commands
     try:
-        client_session.cmd("startx &", timeout=15)
+        client_session.cmd("startx &> /dev/null &", timeout=15)
     except (ShellCmdError, ShellStatusError):
         logging.debug("Ignoring an Exception that Occurs from calling startx")
 
