@@ -151,7 +151,7 @@ variants:
         only no_pci_assignable
         only smallpages
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
-
+        image_name += "_client"
         variants:
             - RHEL:
                 only unattended_install.cdrom.extra_cdrom_ks
@@ -176,8 +176,8 @@ variants:
                                 variants:
                                     - @sp0:
                                     - sp1:
-                                        only Win7.64.sp1
-                                        only unattended_install.cdrom
+                                        only unattended_install.cdrom.in_cdrom_ks
+                                        only Windows.Win7.64.sp1
 
     - @qemu_kvm_install_guest:
         qemu_binary = /usr/libexec/qemu-kvm
@@ -194,16 +194,17 @@ variants:
 
         variants:
             - RHEL:
+                only unattended_install.cdrom.extra_cdrom_ks
                 variants:
                     - 6.3.86_x64:
                         only Linux.RHEL.6.3.x86_64
-                        only unattended_install.cdrom.extra_cdrom_ks
             - Fedora:
+                only unattended_install.cdrom.extra_cdrom_ks
                 variants:
                     - 17.64:
                         unattended_file = unattended/Fedora-17-spice.ks
                         only Linux.Fedora.17.64
-                        only unattended_install.cdrom.extra_cdrom_ks
+
             - Windows:
                 variants:
                     - Win7:
@@ -212,8 +213,8 @@ variants:
                                 variants:
                                     - @sp0:
                                     - sp1:
-                                        only Win7.64.sp1
-                                        only unattended_install.cdrom
+                                        only unattended_install.cdrom.in_cdrom_ks
+                                        only Windows.Win7.64.sp1
 
     - @spice_rv_connect:
         qemu_binary = /usr/libexec/qemu-kvm
@@ -313,6 +314,53 @@ variants:
         only Linux.RHEL.6.3.x86_64
         only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
         only fullscreen_setup.RHEL.6.3.x86_64, rv_connect.RHEL.6.3.x86_64, rv_fullscreen.RHEL.6.3.x86_64, shutdown
+
+    - @spice_migrate:
+        qemu_binary = /usr/libexec/qemu-kvm
+        qemu_img_binary = /usr/bin/qemu-img
+        qemu_io_binary = /usr/bin/qemu-io
+        guest_vm = vm1
+        client_vm = vm2
+        display_vm2 = vnc
+        vga_vm2 = cirrus
+        migrate_background = yes
+        iterations = 1
+        kill_vm = no
+        vms = vm1 vm2
+        only qcow2
+        only e1000
+        only ide
+        only up
+        only no_9p_export
+        only no_pci_assignable
+        only smallpages
+        virtio_port_chardev_vm1 = spicevmc
+        virtio_port_name_prefix_vm1 = com.redhat.spice.
+        virtio_port_type_vm1 = serialport
+        virtio_ports_vm1 = vdagent
+
+        variants:
+            - RHEL:
+                variants:
+                    - @default:
+                    - 6.3.x86_64:
+                        image_name_vm2 = /home/vehrlich/kvm_autotest_root/images/rhel63-64_client
+                        only Linux.RHEL.6.3.x86_64
+                    - 6.3.i386:
+                        only Linux.RHEL.6.3.x86_32
+            - Fedora:
+                variants:
+                    - @default:
+                    - 17.64:
+                        only Linux.Fedora.17.64
+        variants:
+            - @default:
+            - no_ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.no_ssl.no_password.dcp_off.1monitor
+            - ssl:
+                only spice.default_ipv.default_pc.default_sv.default_zlib_wc.default_jpeg_wc.default_ic.ssl.key_password.password.dcp_off.1monitor
+
+        only migrate.default.tcp
 
     - @rv_copyandpaste_rhel63:
         qemu_binary = /usr/libexec/qemu-kvm
@@ -464,6 +512,18 @@ variants:
         #TODO update this as Remote_VIewer_test
         #only spice_rv_connect.no_ssl.Windows.Win7.64.sp1, kill_app.remote-viewer.shutdown.no_ssl.Windows.Win7.64.sp1
         only remote_viewer_win_guest_quick
+    - Migration_Test_RHEL63_64:
+        #Migration test in the easiest way. Connect with remote-viewer
+        #and after migration check if it's possible to disconnect
+        only spice_rv_connect.no_ssl.RHEL.6.3.x86_64, spice_migrate.no_ssl.RHEL.6.3.x86_64, kill_app.remote-viewer.shutdown.no_ssl.RHEL.6.3.x86_64
+    - Migration_Test_Fedora17_64:
+        only spice_rv_connect.no_ssl.Fedora.17.64, spice_migrate.no_ssl.Fedora.17.64, kill_app.remote-viewer.shutdown.no_ssl.Fedora.17.64
+    - Migration_SSL_Test_RHEL63_64:
+        #Migration test in the easiest way. Connect with remote-viewer
+        #and after migration check if it's possible to disconnect
+        only spice_rv_connect.ssl.RHEL.6.3.x86_64, spice_migrate.ssl.RHEL.6.3.x86_64, kill_app.remote-viewer.shutdown.ssl.RHEL.6.3.x86_64
+    - Migration_SSL_Test_Fedora17_64:
+        only spice_rv_connect.ssl.Fedora.17.64, spice_migrate.ssl.Fedora.17.64, kill_app.remote-viewer.shutdown.ssl.Fedora.17.64
     - Copy_Client_to_Guest_POS:
         config_test = "positive_client_to_guest"
         only rv_copyandpaste_rhel63
@@ -598,4 +658,4 @@ variants:
 #only Copy_Client_to_Guest_largetext_POS, Copy_Guest_to_Client_largetext_POS, Copy_Client_to_Guest_POS, Copy_Guest_to_Client_POS, Copy_Guest_to_Client_NEG, Copy_Client_to_Guest_NEG, CopyIMG_Client_to_Guest_POS, CopyIMG_Client_to_Guest_NEG, CopyIMG_Guest_to_Client_POS, CopyIMG_Guest_to_Client_NEG, CopyIMG_Client_to_Guest_DCP_NEG, CopyIMG_Guest_to_Client_DCP_NEG, Copy_Guest_to_Client_DCP_NEG, Copy_Client_to_Guest_DCP_NEG, CopyBMPIMG_Client_to_Guest_POS, CopyBMPIMG_Guest_to_Client_POS, Copy_Guest_to_Client_largetext_10MB_POS, Copy_Client_to_Guest_largetext_10MB_POS, CopyIMG_Medium_Client_to_Guest_POS, CopyIMG_Medium_Guest_to_Client_POS, CopyIMG_Large_Client_to_Guest_POS, CopyIMG_Large_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_POS, only Restart_Vdagent_Copy_Guest_to_Client_POS, Restart_Vdagent_CopyIMG_Client_to_Guest_POS, Restart_Vdagent_CopyIMG_Guest_to_Client_POS, Restart_Vdagent_CopyBMPIMG_Client_to_Guest_POS, Restart_Vdagent_CopyBMPIMG_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_largetext_POS, Restart_Vdagent_Copy_Guest_to_Client_largetext_POS
 
 #Running all Spice Tests
-only Create_VMs, Install_Win_Guest, Negative_QEMU_Spice_Launch_badport, Negative_QEMU_Spice_Launch_badic, Negative_QEMU_Spice_Launch_badjpegwc, Negative_QEMU_Spice_Launch_badzlib, Negative_QEMU_Spice_Launch_badsv, Negative_QEMU_Spice_Launch_badpc, Remote_Viewer_Test, Remote_Viewer_SSL_Test, Remote_Viewer_WinGuest_Test, Remote_Viewer_Disconnect_Test, Copy_Client_to_Guest_largetext_POS, Copy_Guest_to_Client_largetext_POS, Copy_Client_to_Guest_POS, Copy_Guest_to_Client_POS, Copy_Guest_to_Client_NEG, Copy_Client_to_Guest_NEG, CopyIMG_Client_to_Guest_POS, CopyIMG_Client_to_Guest_NEG, CopyIMG_Guest_to_Client_POS, CopyIMG_Guest_to_Client_NEG, CopyIMG_Client_to_Guest_DCP_NEG, CopyIMG_Guest_to_Client_DCP_NEG, Copy_Guest_to_Client_DCP_NEG, Copy_Client_to_Guest_DCP_NEG, CopyBMPIMG_Client_to_Guest_POS, CopyBMPIMG_Guest_to_Client_POS, Copy_Guest_to_Client_largetext_10MB_POS, Copy_Client_to_Guest_largetext_10MB_POS, CopyIMG_Medium_Client_to_Guest_POS, CopyIMG_Medium_Guest_to_Client_POS, CopyIMG_Large_Client_to_Guest_POS, CopyIMG_Large_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_POS, only Restart_Vdagent_Copy_Guest_to_Client_POS, Restart_Vdagent_CopyIMG_Client_to_Guest_POS, Restart_Vdagent_CopyIMG_Guest_to_Client_POS, Restart_Vdagent_CopyBMPIMG_Client_to_Guest_POS, Restart_Vdagent_CopyBMPIMG_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_largetext_POS, Restart_Vdagent_Copy_Guest_to_Client_largetext_POS, Remote_Viewer_FullScreen_Test, Remote_Viewer_FullScreen_Test_NEG, Keyboard_Input_Leds_and_Esc_keys, Keyboard_Input_non-us_layout, Keyboard_Input_Type_and_Func_keys, Keyboard_Input_Leds_migration
+only Create_VMs, Install_Win_Guest, Negative_QEMU_Spice_Launch_badport, Negative_QEMU_Spice_Launch_badic, Negative_QEMU_Spice_Launch_badjpegwc, Negative_QEMU_Spice_Launch_badzlib, Negative_QEMU_Spice_Launch_badsv, Negative_QEMU_Spice_Launch_badpc, Remote_Viewer_Test, Remote_Viewer_SSL_Test, Migration_Test_RHEL63_64, Migration_SSL_Test_RHEL63_64, Migration_Test_Fedora17_64, Migration_SSL_Test_Fedora17_64, Remote_Viewer_WinGuest_Test, Remote_Viewer_Disconnect_Test, Copy_Client_to_Guest_largetext_POS, Copy_Guest_to_Client_largetext_POS, Copy_Client_to_Guest_POS, Copy_Guest_to_Client_POS, Copy_Guest_to_Client_NEG, Copy_Client_to_Guest_NEG, CopyIMG_Client_to_Guest_POS, CopyIMG_Client_to_Guest_NEG, CopyIMG_Guest_to_Client_POS, CopyIMG_Guest_to_Client_NEG, CopyIMG_Client_to_Guest_DCP_NEG, CopyIMG_Guest_to_Client_DCP_NEG, Copy_Guest_to_Client_DCP_NEG, Copy_Client_to_Guest_DCP_NEG, CopyBMPIMG_Client_to_Guest_POS, CopyBMPIMG_Guest_to_Client_POS, Copy_Guest_to_Client_largetext_10MB_POS, Copy_Client_to_Guest_largetext_10MB_POS, CopyIMG_Medium_Client_to_Guest_POS, CopyIMG_Medium_Guest_to_Client_POS, CopyIMG_Large_Client_to_Guest_POS, CopyIMG_Large_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_POS, only Restart_Vdagent_Copy_Guest_to_Client_POS, Restart_Vdagent_CopyIMG_Client_to_Guest_POS, Restart_Vdagent_CopyIMG_Guest_to_Client_POS, Restart_Vdagent_CopyBMPIMG_Client_to_Guest_POS, Restart_Vdagent_CopyBMPIMG_Guest_to_Client_POS, Restart_Vdagent_Copy_Client_to_Guest_largetext_POS, Restart_Vdagent_Copy_Guest_to_Client_largetext_POS, Remote_Viewer_FullScreen_Test, Remote_Viewer_FullScreen_Test_NEG, Keyboard_Input_Leds_and_Esc_keys, Keyboard_Input_non-us_layout, Keyboard_Input_Type_and_Func_keys, Keyboard_Input_Leds_migration
