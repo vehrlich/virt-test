@@ -1,7 +1,12 @@
-import os, logging, imp, sys, time, traceback, Queue
+import os, logging, imp, sys, time, traceback, Queue, glob, shutil
 from autotest.client.shared import error
 from autotest.client import utils
 import utils_misc, utils_params, utils_env, env_process, data_dir, bootstrap
+import storage
+
+
+#: List of test types to strip names by default
+TEST_TYPES_STRIP_NAMES = ['qemu', 'libvirt']
 
 
 class Test(object):
@@ -26,7 +31,7 @@ class Test(object):
             os.makedirs(self.tmpdir)
 
         self.iteration = 0
-        if options.config is None:
+        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
             self.tag = ".".join(params['name'].split(".")[12:])
         else:
             self.tag = ".".join(params['shortname'].split("."))
@@ -86,6 +91,7 @@ class Test(object):
             raise error.TestNAError("Test dependency failed")
 
         # Report the parameters we've received and write them as keyvals
+        logging.info("Starting test %s", self.tag)
         logging.debug("Test parameters:")
         keys = params.keys()
         keys.sort()
@@ -119,16 +125,23 @@ class Test(object):
                                                     params.get("vm_type"),
                                                     "tests")
                     subtest_dirs.append(specific_testdir)
+                    logging.debug("Searching subtest files in dirs %s",
+                                  subtest_dirs)
                     subtest_dir = None
 
                     # Get the test routine corresponding to the specified
                     # test type
+                    logging.debug("Searching for test modules that match "
+                                  "param 'type = %s' on this cartesian dict",
+                                  params.get("type"))
                     t_types = params.get("type").split()
                     test_modules = {}
                     for t_type in t_types:
                         for d in subtest_dirs:
                             module_path = os.path.join(d, "%s.py" % t_type)
                             if os.path.isfile(module_path):
+                                logging.debug("Found subtest module %s",
+                                              module_path)
                                 subtest_dir = d
                                 break
                         if subtest_dir is None:
@@ -181,7 +194,7 @@ class Test(object):
                 raise
             # Abort on error
             logging.info("Aborting job (%s)", e)
-            if params.get("vm_type") == "kvm":
+            if params.get("vm_type") == "qemu":
                 for vm in env.get_all_vms():
                     if vm.is_dead():
                         continue
@@ -217,18 +230,28 @@ class Bcolors(object):
     """
 
     def __init__(self):
-        self.HEADER = '\033[94m'
-        self.PASS = '\033[92m'
-        self.SKIP = '\033[93m'
-        self.FAIL = '\033[91m'
-        self.WARN = '\033[93m'
-        self.ENDC = '\033[0m'
+        self.blue = '\033[94m'
+        self.green = '\033[92m'
+        self.yellow = '\033[93m'
+        self.red = '\033[91m'
+        self.end = '\033[0m'
+        self.HEADER = self.blue
+        self.PASS = self.green
+        self.SKIP = self.yellow
+        self.FAIL = self.red
+        self.WARN = self.yellow
+        self.ENDC = self.end
         allowed_terms = ['linux', 'xterm', 'xterm-256color', 'vt100']
         term = os.environ.get("TERM")
         if (not os.isatty(1)) or (not term in allowed_terms):
             self.disable()
 
     def disable(self):
+        self.blue = ''
+        self.green = ''
+        self.yellow = ''
+        self.red = ''
+        self.end = ''
         self.HEADER = ''
         self.PASS = ''
         self.SKIP = ''
@@ -339,6 +362,48 @@ def create_config_files(options):
         test_dir = os.path.join(test_dir, parent_config_dir)
 
     bootstrap.create_config_files(test_dir, shared_dir, interactive=False)
+    bootstrap.create_subtests_cfg(options.type)
+
+
+def print_test_list(options, cartesian_parser):
+    """
+    Helper function to pretty print the test list.
+
+    This function uses a paginator, if possible (inspired on git).
+
+    @param options: OptParse object with cmdline options.
+    @param cartesian_parser: Cartesian parser object with test options.
+    """
+    try:
+        less_cmd = utils_misc.find_command('less')
+        pipe = os.popen('%s -FRSX' % less_cmd, 'w')
+    except ValueError:
+        pipe = sys.stdout
+    index = 0
+    pipe.write("Tests produced for type %s, config file %s" %
+               (options.type, cartesian_parser.filename))
+    pipe.write("\n\n")
+    for params in cartesian_parser.get_dicts():
+        virt_test_type = params.get('virt_test_type', "")
+        supported_virt_backends = virt_test_type.split(" ")
+        if options.type in supported_virt_backends:
+            index +=1
+            if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
+                # strip "virtio_blk.smp2.virtio_net.JeOS.17.64"
+                shortname = params['name'].split(".")[12:]
+                shortname = ".".join(shortname)
+            else:
+                shortname = params['shortname']
+            needs_root = ((params.get('requires_root', 'no') == 'yes')
+                          or (params.get('vm_type') != 'qemu'))
+            basic_out = (bcolors.blue + str(index) + bcolors.end + " " +
+                         shortname)
+            if needs_root:
+                out =  (basic_out + bcolors.yellow + " (requires root)" +
+                        bcolors.end + "\n")
+            else:
+                out = basic_out + "\n"
+            pipe.write(out)
 
 
 def bootstrap_tests(options):
@@ -359,7 +424,10 @@ def bootstrap_tests(options):
         test_dir = os.path.dirname(os.path.dirname(options.config))
         test_dir = os.path.abspath(test_dir)
 
-    check_modules = ["kvm", "kvm-%s" % utils_misc.get_cpu_vendor(verbose=False)]
+    if options.type == 'qemu':
+        check_modules = ["kvm", "kvm-%s" % utils_misc.get_cpu_vendor(verbose=False)]
+    else:
+        check_modules = None
     online_docs_url = "https://github.com/autotest/virt-test/wiki"
 
     kwargs = {'test_name': options.type,
@@ -385,7 +453,11 @@ def bootstrap_tests(options):
         if t_elapsed > tolerance and not wait_message_printed:
             print_stdout("Running setup. Please wait...")
             wait_message_printed = True
+            sys.stdout.switch()
         time.sleep(0.1)
+
+    if wait_message_printed:
+        sys.stdout.switch()
 
     reason = None
     try:
@@ -432,8 +504,45 @@ def run_tests(parser, options):
 
     last_index = -1
 
+    logging.info("Starting test job at %s" % time.strftime('%Y-%m-%d %H:%M:%S'))
+    logging.info("")
+    logging.debug("Options received from the command line:")
+    utils_misc.display_attributes(options)
+    logging.debug("")
+
+    logging.debug("Cleaning up previous job tmp files")
+    d = parser.get_dicts().next()
+    env_filename = os.path.join(data_dir.get_root_dir(),
+                                options.type, d.get("env", "env"))
+    env = utils_env.Env(env_filename, Test.env_version)
+    env.destroy()
+    try:
+        address_pool_files = glob.glob("/tmp/address_pool*")
+        for address_pool_file in address_pool_files:
+            os.remove(address_pool_file)
+        aexpect_tmp = "/tmp/aexpect_spawn/"
+        if os.path.isdir(aexpect_tmp):
+            shutil.rmtree("/tmp/aexpect_spawn/")
+    except (IOError, OSError):
+        pass
+    logging.debug("")
+
+    if options.restore_image_between_tests:
+        logging.debug("Creating first backup of guest image")
+        qemu_img = storage.QemuImg(d, data_dir.get_data_dir(), "image")
+        qemu_img.backup_image(d, data_dir.get_data_dir(), 'backup', True)
+        logging.debug("")
+
+    if options.type == 'qemu':
+        logging.info("We're running the qemu test with:")
+        logging.info("qemu binary: %s" % d.get('qemu_binary'))
+        logging.info("qemu img binary: %s" % d.get('qemu_img_binary'))
+        logging.info("qemu io binary: %s" % d.get('qemu_io_binary'))
+        logging.info("")
+
+    logging.info("Defined test set:")
     for i, d in enumerate(parser.get_dicts()):
-        if options.config is None:
+        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
             shortname = ".".join(d['name'].split(".")[12:])
         else:
             shortname = ".".join(d['shortname'].split("."))
@@ -446,13 +555,7 @@ def run_tests(parser, options):
         print_stdout("Please check the file for errors (bad variable names, "
                      "wrong indentation)")
         sys.exit(-1)
-
-    # Clean environment file
-    d = parser.get_dicts().next()
-    env_filename = os.path.join(data_dir.get_root_dir(),
-                                options.type, d.get("env", "env"))
-    env = utils_env.Env(env_filename, Test.env_version)
-    env.destroy()
+    logging.info("")
 
     n_tests = last_index + 1
     print_header("TESTS: %s" % n_tests)
@@ -470,7 +573,7 @@ def run_tests(parser, options):
     setup_flag = 1
     cleanup_flag = 2
     for dct in parser.get_dicts():
-        if options.config is None:
+        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
             shortname = ".".join(d['name'].split(".")[12:])
         else:
             shortname = ".".join(d['shortname'].split("."))
@@ -511,28 +614,33 @@ def run_tests(parser, options):
             t = Test(dct, options)
             t.set_debugdir(debugdir)
 
-            print_stdout("%s:" % t.tag, end=False)
+            pretty_index = "(%d/%d)" % (index, n_tests)
+            print_stdout("%s %s:" % (pretty_index, t.tag), end=False)
 
             try:
                 try:
                     t_begin = time.time()
                     t.start_file_logging()
                     current_status = t.run_once()
-                    logging.info("PASS")
+                    logging.info("PASS %s" % t.tag)
+                    logging.info("")
                     t.stop_file_logging()
                 finally:
                     t_end = time.time()
                     t_elapsed = t_end - t_begin
             except error.TestNAError, reason:
-                logging.info("SKIP -> %s: %s", reason.__class__.__name__,
-                             reason)
+                logging.info("SKIP %s -> %s: %s", t.tag,
+                             reason.__class__.__name__, reason)
+                logging.info("")
                 t.stop_file_logging()
                 print_skip()
                 status_dct[dct.get("name")] = False
                 continue
             except error.TestWarn, reason:
-                logging.info("WARN -> %s: %s", reason.__class__.__name__,
+                logging.info("WARN %s -> %s: %s", t.tag,
+                             reason.__class__.__name__,
                              reason)
+                logging.info("")
                 t.stop_file_logging()
                 print_warn(t_elapsed)
                 status_dct[dct.get("name")] = True
@@ -546,12 +654,14 @@ def run_tests(parser, options):
                 for e_line in tb_info.splitlines():
                     logging.error(e_line)
                 logging.error("")
-                logging.error("FAIL -> %s: %s", reason.__class__.__name__,
+                logging.error("FAIL %s -> %s: %s", t.tag,
+                              reason.__class__.__name__,
                               reason)
+                logging.info("")
                 t.stop_file_logging()
                 current_status = False
         else:
-            if options.config is None:
+            if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
                 shortname = ".".join(d['name'].split(".")[12:])
             else:
                 shortname = ".".join(d['shortname'].split("."))

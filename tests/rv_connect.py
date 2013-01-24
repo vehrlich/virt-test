@@ -7,6 +7,7 @@ Requires: binaries remote-viewer, Xorg, netstat
 """
 import logging, os
 from virttest.aexpect import ShellCmdError, ShellStatusError
+from virttest.aexpect import ShellTimeoutError, ShellProcessTerminatedError
 from virttest import utils_net, utils_spice, remote
 
 
@@ -28,7 +29,7 @@ def send_ticket(client_vm, ticket):
     client_vm.send_key("kp_enter")  # send enter
 
 
-def verify_established(client_session, host, port, rv_binary):
+def verify_established(client_vm, host, port, rv_binary):
     """
     Parses netstat output for established connection on host:port
     @param client_session - vm.wait_for_login()
@@ -39,10 +40,10 @@ def verify_established(client_session, host, port, rv_binary):
     rv_binary = rv_binary.split(os.path.sep)[-1]
 
     # !!! -n means do not resolve port names
-    cmd = '(netstat -pn 2>&1| grep "^tcp.*:.*%s:%s.*ESTABLISHED.*%s.*")' % \
-        (host, str(port), rv_binary)
+    cmd = '(netstat -pn 2>&1| grep "^tcp.*:.*%s:%s.*ESTABLISHED.*%s.*") \
+        > /dev/null' % (host, str(port), rv_binary)
     try:
-        netstat_out = client_session.cmd(cmd)
+        netstat_out = client_vm.cmd(cmd)
         logging.info("netstat output: %s", netstat_out)
 
     except ShellCmdError:
@@ -52,6 +53,7 @@ def verify_established(client_session, host, port, rv_binary):
     else:
         logging.info("%s connection to %s:%s successful.",
                rv_binary, host, port)
+    client_vm.close()
 
 
 def print_rv_version(client_session, rv_binary):
@@ -134,25 +136,24 @@ def launch_rv(client_vm, guest_vm, params):
     cmd = "nohup " + cmd + " &> /dev/null &" # Launch it on background
 
     # Launching the actual set of commands
-    try:
-        client_session.cmd("startx &> /dev/null &", timeout=15)
-    except (ShellCmdError, ShellStatusError):
-        logging.debug("Ignoring an Exception that Occurs from calling startx")
-
-    utils_spice.wait_timeout(15)
+    utils_spice.launch_startx(client_vm)
 
     try:
         print_rv_version(client_session, rv_binary)
-    except ShellStatusError:
+    except ShellStatusError, ShellProcessTerminatedError:
         # Sometimes It fails with Status error, ingore it and continue.
         # It's not that important to have printed versions in the log.
-        logging.debug("Ignoring a Status Exception that occurs from calling " \
-                      + "print versions of remote-viewer or spice-gtk")
+        logging.debug("Ignoring a Status Exception that occurs from calling "
+                      "print versions of remote-viewer or spice-gtk")
 
     logging.info("Launching %s on the client (virtual)", cmd)
-    client_session.cmd(cmd)
-
-    utils_spice.wait_timeout(5)  # Wait for concetion to establish
+    try:
+        client_session.cmd(cmd)
+    except ShellStatusError:
+        logging.debug("Ignoring a status exception, will check connection of"
+                      "remote-viewer later")
+    # Wait for concetion to establish
+    utils_spice.wait_timeout(5)  
     # client waits for user entry (authentication) if spice_password is set
     if ticket:
         send_ticket(client_vm, ticket)
@@ -160,8 +161,7 @@ def launch_rv(client_vm, guest_vm, params):
     verify_established(client_session, host_ip, host_port, rv_binary)
 
     #prevent from kill remote-viewer after test finish
-    cmd = "disown -ar"
-    client_session.cmd(cmd)
+    #client_session.cmd("disown -ar")
 
 
 def run_rv_connect(test, params, env):
@@ -172,7 +172,7 @@ def run_rv_connect(test, params, env):
 
     The plan is to support remote-viewer at first place
 
-    @param test: KVM test object.  @param params: Dictionary with the test parameters.
+    @param test: QEMU test object.  @param params: Dictionary with the test parameters.
     @param env: Dictionary with test environment.
     """
 

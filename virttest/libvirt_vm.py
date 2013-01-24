@@ -621,7 +621,7 @@ class VM(virt_vm.BaseVM):
                                                 params.get("cdrom_unattended")
                                              ))
             else:
-                location = params.get("image_dir")
+                location = data_dir.get_data_dir()
                 kernel_dir = os.path.dirname(params.get("kernel"))
                 kernel_parent_dir = os.path.dirname(kernel_dir)
                 pxeboot_link = os.path.join(kernel_parent_dir, "pxeboot")
@@ -1301,14 +1301,16 @@ class VM(virt_vm.BaseVM):
         """
         Shuts down this VM.
         """
-        if virsh.shutdown(self.name, uri=self.connect_uri):
+        try:
+            if virsh.domstate(self.name) != 'shut off':
+                virsh.shutdown(self.name, uri=self.connect_uri)
             if self.wait_for_shutdown():
                 logging.debug("VM %s shut down", self.name)
                 return True
             else:
                 logging.error("VM %s failed to shut down", self.name)
                 return False
-        else:
+        except error.CmdError:
             logging.error("VM %s failed to shut down", self.name)
             return False
 

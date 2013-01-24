@@ -4,7 +4,7 @@ import xml.dom.minidom
 from autotest.client.shared import error, iso9660
 from autotest.client import utils
 from virttest import virt_vm, utils_misc, utils_disk
-from virttest import kvm_monitor, remote, syslog_server
+from virttest import qemu_monitor, remote, syslog_server
 from virttest import http_server, data_dir, utils_net
 
 
@@ -112,7 +112,7 @@ class UnattendedInstallConfig(object):
         """
         Sets class atributes from test parameters.
 
-        @param test: KVM test object.
+        @param test: QEMU test object.
         @param params: Dictionary with test parameters.
         """
         root_dir = data_dir.get_data_dir()
@@ -791,7 +791,7 @@ def run_unattended_install(test, params, env):
     1) Starts a VM with an appropriated setup to start an unattended OS install.
     2) Wait until the install reports to the install watcher its end.
 
-    @param test: KVM test object.
+    @param test: QEMU test object.
     @param params: Dictionary with the test parameters.
     @param env: Dictionary with test environment.
     """
@@ -822,7 +822,7 @@ def run_unattended_install(test, params, env):
             vm.verify_alive()
         # Due to a race condition, sometimes we might get a MonitorError
         # before the VM gracefully shuts down, so let's capture MonitorErrors.
-        except (virt_vm.VMDeadError, kvm_monitor.MonitorError), e:
+        except (virt_vm.VMDeadError, qemu_monitor.MonitorError), e:
             if params.get("wait_no_ack", "no") == "yes":
                 break
             else:
@@ -881,9 +881,11 @@ def run_unattended_install(test, params, env):
         shutdown_cleanly_timeout = int(params.get("shutdown_cleanly_timeout",
                                                   120))
         logging.info("Wait for guest to shutdown cleanly")
+        if params.get("medium","cdrom") == "import":
+            vm.shutdown()
         try:
             if utils_misc.wait_for(vm.is_dead, shutdown_cleanly_timeout, 1, 1):
                 logging.info("Guest managed to shutdown cleanly")
-        except kvm_monitor.MonitorError, e:
+        except qemu_monitor.MonitorError, e:
             logging.warning("Guest apparently shut down, but got a "
                             "monitor error: %s", e)

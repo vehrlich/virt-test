@@ -137,7 +137,8 @@ class VirshSession(aexpect.ShellSession):
         aexpect.ShellSession.__init__(self, virsh_exec, a_id, prompt=prompt,
                                       auto_close=False)
         # fail if libvirtd is not running
-        if self.cmd_status('list', timeout=10) != 0:
+        if self.cmd_status('list', timeout=60) != 0:
+            logging.debug("Persistent virsh session is not responding, libvirtd may be dead.")
             raise aexpect.ShellStatusError(virsh_exec, 'list')
 
 
@@ -268,9 +269,12 @@ class VirshPersistent(Virsh):
             if session_id:
                 try:
                     existing = VirshSession(a_id=session_id)
+                    # except clause exits function
+                    self.dict_del('session_id')
                 except aexpect.ShellStatusError:
                     # session was already closed
-                    return
+                    self.dict_del('session_id')
+                    return # don't check is_alive or update counter
                 if existing.is_alive():
                     # try nicely first
                     existing.close()
@@ -279,9 +283,10 @@ class VirshPersistent(Virsh):
                         existing.close(sig=signal.SIGTERM)
                     # Keep count:
                     self.__class__.SESSION_COUNTER -= 1
+                    self.dict_del('session_id')
         except KeyError:
             # Allow other exceptions to be raised
-            pass
+            pass # session was closed already
 
 
     def new_session(self):
@@ -656,6 +661,34 @@ def dumpxml(name, to_file="", **dargs):
     return result.stdout.strip()
 
 
+def domxml_from_native(format, file, options=None, **dargs):
+    """
+    Convert native guest configuration format to domain XML format.
+
+    @param format:The command's options. For exmple:qemu-argv.
+    @param file:Native infomation file.
+    @param options:extra param.
+    @param dargs: standardized virsh function API keywords.
+    @return: result from command
+    """
+    cmd = "domxml-from-native %s %s %s" % (format, file, options)
+    return command(cmd, **dargs)
+
+
+def domxml_to_native(format, file, options, **dargs):
+    """
+    Convert domain XML config to a native guest configuration format.
+
+    @param format:The command's options. For exmple:qemu-argv.
+    @param file:XML config file.
+    @param options:extra param.
+    @param dargs: standardized virsh function API keywords
+    @return: result from command
+    """
+    cmd = "domxml-to-native %s %s %s" % (format, file, options)
+    return command(cmd, **dargs)
+
+
 def is_alive(name, **dargs):
     """
     Return True if the domain is started/alive.
@@ -775,17 +808,9 @@ def shutdown(name, **dargs):
 
     @param: name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: True operation was successful
+    @return: CmdResult object
     """
-    if domstate(name, **dargs) == 'shut off':
-        return True
-    dargs['ignore_status'] = False
-    try:
-        command("shutdown %s" % (name), **dargs)
-        return True
-    except error.CmdError, detail:
-        logging.error("Shutdown VM %s failed:\n%s", name, detail)
-        return False
+    return command("shutdown %s" % (name), **dargs)
 
 
 def destroy(name, **dargs):
@@ -973,44 +998,146 @@ def detach_interface(name, option="", **dargs):
     return command(cmd, **dargs)
 
 
-def net_create(xml_file, extra="", **dargs):
+def net_dumpxml(net_name="", extra="", **dargs):
     """
-    Create network from a XML file.
+    Dump XML from network named net_name.
 
-    @param: xml_file: xml defining network
+    @param: net_name: Name of a network
     @param: extra: extra parameters to pass to command
-    @param: options: options to pass to command
     @param: dargs: standardized virsh function API keywords
     @return: CmdResult object
     """
-    cmd = "net-create --file %s %s" % (xml_file, extra)
+    cmd = "net-dumpxml %s %s" % (net_name, extra)
     return command(cmd, **dargs)
+
+
+def net_create(xml_file, extra="", **dargs):
+    """
+    Create _transient_ network from a XML file.
+
+    @param: xml_file: xml defining network
+    @param: extra: extra parameters to pass to command
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("net-create %s %s" % (xml_file, extra), **dargs)
+
+
+def net_define(xml_file, extra="", **dargs):
+    """
+    Define network from a XML file, do not start
+
+    @param: xml_file: xml defining network
+    @param: extra: extra parameters to pass to command
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("net-define %s %s" % (xml_file, extra), **dargs)
 
 
 def net_list(options, extra="", **dargs):
     """
     List networks on host.
 
-    @param: extra: extra parameters to pass to command
     @param: options: options to pass to command
+    @param: extra: extra parameters to pass to command
     @param: dargs: standardized virsh function API keywords
     @return: CmdResult object
     """
-    cmd = "net-list %s %s" % (options, extra)
-    return command(cmd, **dargs)
+    return command("net-list %s %s" % (options, extra), **dargs)
 
 
-def net_destroy(name, extra="", **dargs):
+def net_state_dict(only_names=False, **dargs):
     """
-    Destroy actived network on host.
+    Return network name to state/autostart/persistent mapping
 
-    @param: name: name of guest
+    @param: only_names: When true, return network names as keys and None values
+    @param: dargs: standardized virsh function API keywords
+    @return: dictionary
+    """
+    dargs['ignore_status'] = True # so persistent check can work
+    netlist = net_list("--all", print_info=True).stdout.strip().splitlines()
+    # First two lines contain table header
+    netlist = netlist[2:]
+    result = {}
+    for line in netlist:
+        linesplit = line.split(None, 3)
+        name = linesplit[0]
+        # Several callers in libvirt_xml only requre defined names
+        if only_names:
+            result[name] = None
+            continue
+        # Keep search fast & avoid first-letter capital problems
+        active = not bool(linesplit[1].count("nactive"))
+        autostart = bool(linesplit[2].count("es"))
+        try:
+            # These will throw exception if network is transient
+            if autostart:
+                net_autostart(name, **dargs)
+            else:
+                net_autostart(name, "--disable", **dargs)
+            # no exception raised, must be persistent
+            persistent = True
+        except error.CmdError, cmdstatus:
+            # Keep search fast & avoid first-letter capital problems
+            if not bool(cmdstatus.stdout.count("ransient")):
+                persistent = False
+            else:
+                # Different error occured, re-raise it
+                raise
+        # Warning: These key names are used by libvirt_xml and test modules!
+        result[name] = {'active':active,
+                        'autostart':autostart,
+                        'persistent':persistent}
+    return result
+
+
+def net_start(network, extra="", **dargs):
+    """
+    Start network on host.
+
+    @param: network: name/parameter for network option/argument
+    @param: extra: extra parameters to pass to command
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("net-start %s %s" % (network, extra), **dargs)
+
+
+def net_destroy(network, extra="", **dargs):
+    """
+    Destroy (stop) an activated network on host.
+
+    @param: network: name/parameter for network option/argument
     @param: extra: extra string to pass to command
     @param: dargs: standardized virsh function API keywords
     @return: CmdResult object
     """
-    cmd = "net-destroy --network %s %s" % (name, extra)
-    return command(cmd, **dargs)
+    return command("net-destroy %s %s" % (network, extra), **dargs)
+
+
+def net_undefine(network, extra="", **dargs):
+    """
+    Undefine a defined network on host.
+
+    @param: network: name/parameter for network option/argument
+    @param: extra: extra string to pass to command
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("net-undefine %s %s" % (network, extra), **dargs)
+
+
+def net_autostart(network, extra="", **dargs):
+    """
+    Set/unset a network to autostart on host boot
+
+    @param: network: name/parameter for network option/argument
+    @param: extra: extra parameters to pass to command (e.g. --disable)
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("net-autostart %s %s" % (network, extra), **dargs)
 
 
 def pool_info(name, **dargs):
@@ -1196,3 +1323,123 @@ def setmem(domainarg=None, sizearg=None, domain=None,
     if len(flagstr) > 0:
         cmd += " %s" % flagstr
     return command(cmd, **dargs)
+
+
+def snapshot_create(name, **dargs):
+    """
+    Create snapshot of domain.
+
+    @param name: name of domain
+    @param: dargs: standardized virsh function API keywords
+    @return: name of snapshot
+    """
+    # CmdResult is handled here, force ignore_status
+    dargs['ignore_status'] = True
+    cmd = "snapshot-create %s" % name
+    sc_output = command(cmd, **dargs)
+    if sc_output.exit_status != 0:
+        raise error.CmdError(cmd, sc_output, "Failed to create snapshot")
+    snapshot_number = re.search("\d+", sc_output.stdout.strip()).group(0)
+
+    return snapshot_number
+
+
+def snapshot_current(name, **dargs):
+    """
+    Create snapshot of domain.
+
+    @param name: name of domain
+    @param: dargs: standardized virsh function API keywords
+    @return: name of snapshot
+    """
+    # CmdResult is handled here, force ignore_status
+    dargs['ignore_status'] = True
+    cmd = "snapshot-current %s --name" % name
+    sc_output = command(cmd, **dargs)
+    if sc_output.exit_status != 0:
+        raise error.CmdError(cmd, sc_output, "Failed to get current snapshot")
+
+    return sc_output.stdout.strip()
+
+
+def snapshot_list(name, **dargs):
+    """
+    Get list of snapshots of domain.
+
+    @param name: name of domain
+    @param: dargs: standardized virsh function API keywords
+    @return: list of snapshot names
+    """
+    # CmdResult is handled here, force ignore_status
+    dargs['ignore_status'] = True
+    ret = []
+    cmd = "snapshot-list %s" % name
+    sc_output = command(cmd, **dargs)
+    if sc_output.exit_status != 0:
+        raise error.CmdError(cmd, sc_output, "Failed to get list of snapshots")
+
+    data = re.findall("\w* *\d*-\d*-\d* \d*:\d*:\d* [+-]\d* \w*",
+                      sc_output.stdout)
+    for rec in data:
+        if not rec:
+            continue
+        ret.append(re.match("\w*", rec).group())
+
+    return ret
+
+
+def snapshot_info(name, snapshot, **dargs):
+    """
+    Check snapshot information.
+
+    @param name: name of domain
+    @param snapshot: name os snapshot to verify
+    @param: dargs: standardized virsh function API keywords
+    @return: snapshot information dictionary
+    """
+    # CmdResult is handled here, force ignore_status
+    dargs['ignore_status'] = True
+    ret = {}
+    values = ["Name", "Domain", "Current", "State", "Parent",
+              "Children","Descendants", "Metadata"]
+
+    cmd = "snapshot-info %s %s" % (name, snapshot)
+    sc_output = command(cmd, **dargs)
+    if sc_output.exit_status != 0:
+        raise error.CmdError(cmd, sc_output, "Failed to get snapshot info")
+
+    for val in values:
+        data = re.search("(?<=%s:) *\w*" % val, sc_output.stdout)
+        if data is None:
+            continue
+        ret[val] = data.group(0).strip()
+
+    if ret["Parent"] == "-":
+        ret["Parent"] = None
+
+    return ret
+
+
+def snapshot_revert(name, snapshot, **dargs):
+    """
+    Revert domain state to saved snapshot.
+
+    @param name: name of domain
+    @param: dargs: standardized virsh function API keywords
+    @param snapshot: snapshot to revert to
+    @return: CmdResult instance
+    """
+    return command("snapshot-revert %s %s" % (name, snapshot), **dargs)
+
+
+
+def snapshot_delete(name, snapshot, **dargs):
+    """
+    Remove domain snapshot
+
+    @param name: name of domain
+    @param: dargs: standardized virsh function API keywords
+    @param snapshot: snapshot to delete
+    @return: CmdResult instance
+    """
+    return command("snapshot-delete %s %s" % (name, snapshot), **dargs)

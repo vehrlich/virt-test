@@ -26,8 +26,8 @@ def run_kill_app(test, params, env):
     app_name = params.get("kill_app_name", None)
     logging.debug("vms %s" % vms)
     if not vms:
-        logging.warning("Kill app test launched without any VM parameter")
-        logging.warning("Now I'm confused where should kill application.")
+        logging.error("Kill app test launched without any VM parameter")
+        logging.error("Now I'm confused where should kill application.")
     else:    
         for vm in vms:
             logging.debug("vm %s" % vm)
