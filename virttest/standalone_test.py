@@ -1,12 +1,35 @@
-import os, logging, imp, sys, time, traceback, Queue, glob, shutil
+import os, logging, imp, sys, time, traceback, Queue, glob, shutil, inspect
 from autotest.client.shared import error
 from autotest.client import utils
 import utils_misc, utils_params, utils_env, env_process, data_dir, bootstrap
-import storage
+import storage, cartesian_config
+
+global GUEST_NAME_LIST
+GUEST_NAME_LIST = None
+global TAG_INDEX
+TAG_INDEX = None
 
 
-#: List of test types to strip names by default
-TEST_TYPES_STRIP_NAMES = ['qemu', 'libvirt']
+def get_tag_index(options, params):
+    global TAG_INDEX
+    if TAG_INDEX is None:
+        guest_name_list = get_guest_name_list(options)
+
+        name = params['name']
+
+        for guest_name in guest_name_list:
+            if guest_name in name:
+                idx = name.index(guest_name)
+                TAG_INDEX = idx + len(guest_name) + 1
+                break
+
+    return TAG_INDEX
+
+
+def get_tag(params, index):
+    name = params['name']
+    name = name[index:]
+    return ".".join(name.split("."))
 
 
 class Test(object):
@@ -31,10 +54,8 @@ class Test(object):
             os.makedirs(self.tmpdir)
 
         self.iteration = 0
-        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
-            self.tag = ".".join(params['name'].split(".")[12:])
-        else:
-            self.tag = ".".join(params['shortname'].split("."))
+        tag_index = get_tag_index(options, params)
+        self.tag = get_tag(params, tag_index)
         self.debugdir = None
         self.outputdir = None
         self.resultsdir = None
@@ -350,7 +371,6 @@ def create_config_files(options):
     """
     shared_dir = os.path.dirname(data_dir.get_data_dir())
     test_dir = os.path.dirname(shared_dir)
-    shared_dir = os.path.join(shared_dir, "cfg")
 
     if (options.type and options.config):
         test_dir = os.path.join(test_dir, options.type)
@@ -358,11 +378,21 @@ def create_config_files(options):
         test_dir = os.path.join(test_dir, options.type)
     elif options.config:
         parent_config_dir = os.path.dirname(options.config)
-        parent_config_dir = os.path.basename(parent_config_dir)
+        parent_config_dir = os.path.dirname(parent_config_dir)
+        options.type = parent_config_dir
         test_dir = os.path.join(test_dir, parent_config_dir)
 
     bootstrap.create_config_files(test_dir, shared_dir, interactive=False)
     bootstrap.create_subtests_cfg(options.type)
+    bootstrap.create_guest_os_cfg(options.type)
+
+
+def get_paginator():
+    try:
+        less_cmd = utils_misc.find_command('less')
+        return os.popen('%s -FRSX' % less_cmd, 'w')
+    except ValueError:
+        return sys.stdout
 
 
 def print_test_list(options, cartesian_parser):
@@ -374,26 +404,26 @@ def print_test_list(options, cartesian_parser):
     @param options: OptParse object with cmdline options.
     @param cartesian_parser: Cartesian parser object with test options.
     """
-    try:
-        less_cmd = utils_misc.find_command('less')
-        pipe = os.popen('%s -FRSX' % less_cmd, 'w')
-    except ValueError:
-        pipe = sys.stdout
+    pipe = get_paginator()
     index = 0
-    pipe.write("Tests produced for type %s, config file %s" %
-               (options.type, cartesian_parser.filename))
-    pipe.write("\n\n")
+    pipe.write("Tests produced by config file %s\n\n" %
+               cartesian_parser.filename)
+    pipe.write("Filters applied according to options:\n")
+    for member in inspect.getmembers(options):
+        name, value = member
+        attribute = getattr(options, name)
+        if not (name.startswith("__") or callable(attribute) or not value):
+            pipe.write("    %s: %s\n" % (name, value))
+
+    pipe.write("\n")
+    d = cartesian_parser.get_dicts().next()
+    tag_index = get_tag_index(options, d)
     for params in cartesian_parser.get_dicts():
         virt_test_type = params.get('virt_test_type', "")
         supported_virt_backends = virt_test_type.split(" ")
         if options.type in supported_virt_backends:
             index +=1
-            if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
-                # strip "virtio_blk.smp2.virtio_net.JeOS.17.64"
-                shortname = params['name'].split(".")[12:]
-                shortname = ".".join(shortname)
-            else:
-                shortname = params['shortname']
+            shortname = get_tag(params, tag_index)
             needs_root = ((params.get('requires_root', 'no') == 'yes')
                           or (params.get('vm_type') != 'qemu'))
             basic_out = (bcolors.blue + str(index) + bcolors.end + " " +
@@ -404,6 +434,58 @@ def print_test_list(options, cartesian_parser):
             else:
                 out = basic_out + "\n"
             pipe.write(out)
+
+
+def get_guest_name_list(options):
+    global GUEST_NAME_LIST
+    if GUEST_NAME_LIST is None:
+        cfg = os.path.join(data_dir.get_root_dir(), options.type,
+                           "cfg", "guest-os.cfg")
+        cartesian_parser = cartesian_config.Parser()
+        cartesian_parser.parse_file(cfg)
+        guest_name_list = []
+        for params in cartesian_parser.get_dicts():
+            shortname = ".".join(params['name'].split(".")[1:])
+            guest_name_list.append(shortname)
+
+        GUEST_NAME_LIST = guest_name_list
+
+    return GUEST_NAME_LIST
+
+
+
+def print_guest_list(options):
+    """
+    Helper function to pretty print the guest list.
+
+    This function uses a paginator, if possible (inspired on git).
+
+    @param options: OptParse object with cmdline options.
+    @param cartesian_parser: Cartesian parser object with test options.
+    """
+    cfg = os.path.join(data_dir.get_root_dir(), options.type,
+                       "cfg", "guest-os.cfg")
+    cartesian_parser = cartesian_config.Parser()
+    cartesian_parser.parse_file(cfg)
+    pipe = get_paginator()
+    index = 0
+    pipe.write("Searched %s for guest images\n" %
+               os.path.join(data_dir.get_data_dir(), 'images'))
+    pipe.write("Available guests:")
+    pipe.write("\n\n")
+    for params in cartesian_parser.get_dicts():
+        index +=1
+        image_name = storage.get_image_filename(params, data_dir.get_data_dir())
+        shortname = ".".join(params['name'].split(".")[1:])
+        if os.path.isfile(image_name):
+            out = (bcolors.blue + str(index) + bcolors.end + " " +
+                   shortname + "\n")
+        else:
+            out = (bcolors.blue + str(index) + bcolors.end + " " +
+                   shortname + " " + bcolors.yellow +
+                   "(missing %s)" % os.path.basename(image_name) +
+                   bcolors.end + "\n")
+        pipe.write(out)
 
 
 def bootstrap_tests(options):
@@ -421,8 +503,10 @@ def bootstrap_tests(options):
         test_dir = os.path.abspath(os.path.join(os.path.dirname(test_dir),
                                                 options.type))
     elif options.config:
-        test_dir = os.path.dirname(os.path.dirname(options.config))
-        test_dir = os.path.abspath(test_dir)
+        parent_config_dir = os.path.dirname(os.path.dirname(options.config))
+        parent_config_dir = os.path.dirname(parent_config_dir)
+        options.type = parent_config_dir
+        test_dir = os.path.abspath(parent_config_dir)
 
     if options.type == 'qemu':
         check_modules = ["kvm", "kvm-%s" % utils_misc.get_cpu_vendor(verbose=False)]
@@ -540,12 +624,10 @@ def run_tests(parser, options):
         logging.info("qemu io binary: %s" % d.get('qemu_io_binary'))
         logging.info("")
 
+    tag_index = get_tag_index(options, d)
     logging.info("Defined test set:")
     for i, d in enumerate(parser.get_dicts()):
-        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
-            shortname = ".".join(d['name'].split(".")[12:])
-        else:
-            shortname = ".".join(d['shortname'].split("."))
+        shortname = get_tag(d, tag_index)
 
         logging.info("Test %4d:  %s" % (i + 1, shortname))
         last_index += 1
@@ -573,10 +655,7 @@ def run_tests(parser, options):
     setup_flag = 1
     cleanup_flag = 2
     for dct in parser.get_dicts():
-        if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
-            shortname = ".".join(d['name'].split(".")[12:])
-        else:
-            shortname = ".".join(d['shortname'].split("."))
+        shortname = get_tag(dct, tag_index)
 
         if index == 0:
             if dct.get("host_setup_flag", None) is not None:
@@ -661,10 +740,7 @@ def run_tests(parser, options):
                 t.stop_file_logging()
                 current_status = False
         else:
-            if options.config is None and options.type in TEST_TYPES_STRIP_NAMES:
-                shortname = ".".join(d['name'].split(".")[12:])
-            else:
-                shortname = ".".join(d['shortname'].split("."))
+            shortname = get_tag(d, tag_index)
             print_stdout("%s:" % shortname, end=False)
             print_skip()
             status_dct[dct.get("name")] = False

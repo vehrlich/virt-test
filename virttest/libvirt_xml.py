@@ -382,7 +382,7 @@ class VMXML(VMXMLBase):
     __slots__ = VMXMLBase.__slots__
 
 
-    def __init__(self, hypervisor_type='kvm', virsh_instance=virsh):
+    def __init__(self, virsh_instance=virsh, hypervisor_type='kvm'):
         """
         Create new VM XML instance
         """
@@ -399,7 +399,7 @@ class VMXML(VMXMLBase):
         @param: virsh_instance: virsh module or instance to use
         @return: New initialized VMXML instance
         """
-        vmxml = VMXML(virsh_instance)
+        vmxml = VMXML(virsh_instance=virsh_instance)
         vmxml['xml'] = virsh_instance.dumpxml(vm_name)
         return vmxml
 
@@ -430,8 +430,7 @@ class VMXML(VMXMLBase):
         if vm.is_alive():
             vm.destroy(gracefully=True)
 
-        vmxml = VMXML(virsh)
-        vmxml = vmxml.new_from_dumpxml(vm.name)
+        vmxml = VMXML.new_from_dumpxml(vm.name)
         backup = vmxml.copy()
         # can't do in-place rename, must operate on XML
         try:
@@ -482,6 +481,33 @@ class VMXML(VMXMLBase):
         vmxml.define()
         # Temporary files for vmxml cleaned up automatically
         # when it goes out of scope here.
+
+
+    def get_disk_all(self):
+        """
+        Return VM's disk from XML definition, None if not set
+        """
+        xmltreefile = self.dict_get('xml')
+        disk_nodes = xmltreefile.find('devices').findall('disk')
+        disks = {}
+        for node in disk_nodes:
+            dev = node.find('target').get('dev')
+            disks[dev] = node
+        return disks
+
+
+    @staticmethod
+    def get_disk_blk(vm_name):
+        """
+        Get block device  of a defined VM's disks.
+
+        @param: vm_name: Name of defined vm.
+        """
+        vmxml = VMXML.new_from_dumpxml(vm_name)
+        disks = vmxml.get_disk_all()
+        if disks != None:
+            return disks.keys()
+        return None
 
 
     #TODO: Add function to create from xml_utils.TemplateXML()

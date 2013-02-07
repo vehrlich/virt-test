@@ -179,7 +179,11 @@ class UnattendedInstallConfig(object):
 
         # Content server params
         # lookup host ip address for first nic by interface name
-        auto_ip = utils_net.get_ip_address_by_interface(vm.virtnet[0].netdst)
+        try:
+            auto_ip = utils_net.get_ip_address_by_interface(vm.virtnet[0].netdst)
+        except utils_net.NetError:
+            auto_ip = None
+
         self.url_auto_content_ip = params.get('url_auto_ip', auto_ip)
         self.url_auto_content_port = None
 
@@ -451,8 +455,8 @@ class UnattendedInstallConfig(object):
             dest_fname = 'winnt.sif'
             setup_file = 'winnt.bat'
             boot_disk = utils_disk.FloppyDisk(self.floppy,
-                                                   self.qemu_img_binary,
-                                                   self.tmpdir, self.vfd_size)
+                                              self.qemu_img_binary,
+                                              self.tmpdir, self.vfd_size)
             answer_path = boot_disk.get_answer_file_path(dest_fname)
             self.answer_windows_ini(answer_path)
             setup_file_path = os.path.join(self.unattended_dir, setup_file)
@@ -531,8 +535,8 @@ class UnattendedInstallConfig(object):
                                                       self.tmpdir)
             elif self.params.get('unattended_delivery_method') == 'floppy':
                 boot_disk = utils_disk.FloppyDisk(self.floppy,
-                                                       self.qemu_img_binary,
-                                                       self.tmpdir, self.vfd_size)
+                                                  self.qemu_img_binary,
+                                                  self.tmpdir, self.vfd_size)
             else:
                 raise ValueError("Neither cdrom_unattended nor floppy set "
                                  "on the config file, please verify")
@@ -548,8 +552,9 @@ class UnattendedInstallConfig(object):
                                                           self.tmpdir)
                 elif self.floppy:
                     boot_disk = utils_disk.FloppyDisk(self.floppy,
-                                                           self.qemu_img_binary,
-                                                           self.tmpdir, self.vfd_size)
+                                                      self.qemu_img_binary,
+                                                      self.tmpdir,
+                                                      self.vfd_size)
                 else:
                     raise ValueError("Neither cdrom_unattended nor floppy set "
                                      "on the config file, please verify")
@@ -560,8 +565,8 @@ class UnattendedInstallConfig(object):
                 # Windows unattended install
                 dest_fname = "autounattend.xml"
                 boot_disk = utils_disk.FloppyDisk(self.floppy,
-                                                       self.qemu_img_binary,
-                                                       self.tmpdir, self.vfd_size)
+                                                  self.qemu_img_binary,
+                                                  self.tmpdir, self.vfd_size)
                 answer_path = boot_disk.get_answer_file_path(dest_fname)
                 self.answer_windows_xml(answer_path)
 
@@ -607,7 +612,7 @@ class UnattendedInstallConfig(object):
             self.preseed_initrd()
 
         if self.params.get("vm_type") == "libvirt":
-            if self.vm.driver_type == 'qemu':
+            if self.vm.driver_type == 'kvm':
                 # Virtinstall command needs files "vmlinuz" and "initrd.img"
                 os.chdir(self.image_path)
                 base_kernel = os.path.basename(self.kernel)
@@ -663,7 +668,7 @@ class UnattendedInstallConfig(object):
         Download the vmlinuz and initrd.img from URL.
         """
         # it's only necessary to download kernel/initrd if running bare qemu
-        if self.vm_type == 'kvm':
+        if self.vm_type == 'qemu':
             error.context("downloading vmlinuz/initrd.img from %s" % self.url)
             if not os.path.exists(self.image_path):
                 os.mkdir(self.image_path)

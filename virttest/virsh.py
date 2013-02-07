@@ -539,6 +539,17 @@ def dom_list(options="", **dargs):
     return command("list %s" % options, **dargs)
 
 
+def reboot(name, options="", **dargs):
+    """
+    Run a reboot command in the target domain.
+
+    @param: name: Name of domain.
+    @param: options: options: options to pass to reboot command
+    @return: CmdResult object
+    """
+    return command("reboot --domain %s %s" % (name, options), **dargs)
+
+
 def managedsave(name, options="", **dargs):
     """
     Managed save of a domain state.
@@ -580,9 +591,9 @@ def domstate(name, **dargs):
 
     @param name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: standard output from command
+    @return: CmdResult object
     """
-    return command("domstate %s" % name, **dargs).stdout.strip()
+    return command("domstate %s" % name, **dargs)
 
 
 def domid(name, **dargs):
@@ -640,6 +651,19 @@ def screenshot(name, filename, **dargs):
     return filename
 
 
+def domblkstat(name, device, option, **dargs):
+    """
+    Store state of VM into named file.
+
+    @param: name: VM's name.
+    @param: device: VM's device.
+    @param: option: command domblkstat option.
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    return command("domblkstat %s %s %s" % (name, device, option), **dargs)
+
+
 def dumpxml(name, to_file="", **dargs):
     """
     Return the domain information as an XML dump.
@@ -659,6 +683,39 @@ def dumpxml(name, to_file="", **dargs):
         raise error.CmdError(cmd, result,
                                  "Virsh dumpxml returned non-zero exit status")
     return result.stdout.strip()
+
+
+def domifstat(name, interface, **dargs):
+    """
+    Get network interface stats for a running domain.
+
+    @param: name: Name of domain
+    @param: interface: interface device
+    @return: CmdResult object
+    """
+    return command("domifstat %s %s" % (name, interface), **dargs)
+
+
+def domjobinfo(name, **dargs):
+    """
+    Get domain job information.
+
+    @param: name: VM name
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    return command("domjobinfo %s" % name, **dargs)
+
+
+def edit(options, **dargs):
+    """
+    Edit the XML configuration for a domain.
+
+    @param options: virsh edit options string.
+    @param dargs: standardized virsh function API keywords
+    @return: CmdResult object
+    """
+    return command("edit %s" % options, **dargs)
 
 
 def domxml_from_native(format, file, options=None, **dargs):
@@ -710,7 +767,7 @@ def is_dead(name, **dargs):
     """
     dargs['ignore_status'] = False
     try:
-        state = domstate(name, **dargs)
+        state = domstate(name, **dargs).stdout.strip()
     except error.CmdError:
         return True
     if state in ('running', 'idle', 'no state', 'paused'):
@@ -725,19 +782,9 @@ def suspend(name, **dargs):
 
     @param: name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: True operation was successful
+    @return: CmdResult object
     """
-    dargs['ignore_status'] = False
-    try:
-        command("suspend %s" % (name), **dargs)
-        if domstate(name, **dargs) == 'paused':
-            logging.debug("Suspended VM %s", name)
-            return True
-        else:
-            return False
-    except error.CmdError, detail:
-        logging.error("Suspending VM %s failed:\n%s", name, detail)
-        return False
+    return command("suspend %s" % (name), **dargs)
 
 
 def resume(name, **dargs):
@@ -759,6 +806,31 @@ def resume(name, **dargs):
     except error.CmdError, detail:
         logging.error("Resume VM %s failed:\n%s", name, detail)
         return False
+
+
+def dommemstat(name, extra="", **dargs):
+    """
+    Store state of VM into named file.
+
+    @param: name: VM name
+    @param: extra: extra options to pass to command
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    return command("dommemstat %s %s" % (name, extra), **dargs)
+
+
+def dump(name, path, option="", **dargs):
+    """
+    Dump the core of a domain to a file for analysis.
+
+    @param: name: VM name
+    @param: path: absolute path to state file
+    @param: option: command's option.
+    @param: dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    return command("dump %s %s %s" % (name, path, option), **dargs)
 
 
 def save(option, path, **dargs):
@@ -819,17 +891,9 @@ def destroy(name, **dargs):
 
     @param: name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: True operation was successful
+    @return: CmdResult object
     """
-    if domstate(name, **dargs) == 'shut off':
-        return True
-    dargs['ignore_status'] = False
-    try:
-        command("destroy %s" % (name), **dargs)
-        return True
-    except error.CmdError, detail:
-        logging.error("Destroy VM %s failed:\n%s", name, detail)
-        return False
+    return command("destroy %s" % (name), **dargs)
 
 
 def define(xml_path, **dargs):
@@ -838,9 +902,8 @@ def define(xml_path, **dargs):
 
     @param: xml_path: XML file path
     @param: dargs: standardized virsh function API keywords
-    @return: True operation was successful
+    @return: CmdResult object
     """
-    dargs['ignore_status'] = False
     cmd = "define --file %s" % xml_path
     logging.debug("Define VM from %s", xml_path)
     return command(cmd, **dargs)
@@ -852,9 +915,8 @@ def undefine(name, **dargs):
 
     @param: name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: True operation was successful
+    @return: CmdResult object
     """
-    dargs['ignore_status'] = False
     cmd = "undefine %s" % name
     logging.debug("Undefine VM %s", name)
     return command(cmd, **dargs)
@@ -872,6 +934,7 @@ def remove_domain(name, **dargs):
         if is_alive(name, **dargs):
             destroy(name, **dargs)
         try:
+            dargs['ignore_status'] = False
             undefine(name, **dargs)
         except error.CmdError, detail:
             logging.error("Undefine VM %s failed:\n%s", name, detail)
@@ -1443,3 +1506,19 @@ def snapshot_delete(name, snapshot, **dargs):
     @return: CmdResult instance
     """
     return command("snapshot-delete %s %s" % (name, snapshot), **dargs)
+
+
+def domblklist(name, options=None, **dargs):
+    """
+    Get domain devices.
+
+    @param name: name of domain
+    @param options: options of domblklist.
+    @param dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    cmd = "domblklist %s" % name
+    if options:
+        cmd += " %s" % options
+
+    return command(cmd, **dargs)

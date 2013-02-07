@@ -59,8 +59,8 @@ def service_libvirtd_control(action):
     @ param action: start|stop|status|restart|condrestart|
       reload|force-reload|try-restart
     """
-    actions = ['start','stop','restart','condrestart','reload',
-               'force-reload','try-restart']
+    actions = ['start', 'stop', 'restart', 'condrestart', 'reload',
+               'force-reload', 'try-restart']
     if action in actions:
         try:
             utils.run("service libvirtd %s" % action)
@@ -170,7 +170,7 @@ class VM(virt_vm.BaseVM):
         if not self.is_alive():
             raise virt_vm.VMDeadError("Domain %s is inactive" % self.name,
                                       virsh.domstate(self.name,
-                                                     uri=self.connect_uri))
+                                      uri=self.connect_uri).stdout.strip())
 
 
     def is_alive(self):
@@ -203,7 +203,8 @@ class VM(virt_vm.BaseVM):
         Undefine the VM.
         """
         try:
-            virsh.undefine(self.name, uri=self.connect_uri)
+            virsh.undefine(self.name, uri=self.connect_uri,
+                           ignore_status=False)
         except error.CmdError, detail:
             logging.error("Undefined VM %s failed:\n%s", self.name, detail)
             return False
@@ -218,7 +219,8 @@ class VM(virt_vm.BaseVM):
             logging.error("File %s not found." % xml_file)
             return False
         try:
-            virsh.define(xml_file, uri=self.connect_uri)
+            virsh.define(xml_file, uri=self.connect_uri,
+                         ignore_status=False)
         except error.CmdError, detail:
             logging.error("Defined VM from %s failed:\n%s", xml_file, detail)
             return False
@@ -229,7 +231,7 @@ class VM(virt_vm.BaseVM):
         """
         Return domain state.
         """
-        return virsh.domstate(self.name, uri=self.connect_uri)
+        return virsh.domstate(self.name, uri=self.connect_uri).stdout.strip()
 
 
     def get_id(self):
@@ -1302,7 +1304,7 @@ class VM(virt_vm.BaseVM):
         Shuts down this VM.
         """
         try:
-            if virsh.domstate(self.name) != 'shut off':
+            if virsh.domstate(self.name).stdout.strip() != 'shut off':
                 virsh.shutdown(self.name, uri=self.connect_uri)
             if self.wait_for_shutdown():
                 logging.debug("VM %s shut down", self.name)
@@ -1316,7 +1318,14 @@ class VM(virt_vm.BaseVM):
 
 
     def pause(self):
-        return virsh.suspend(self.name, uri=self.connect_uri)
+        try:
+            state = virsh.domstate(self.name)
+            if state not in ('paused',):
+                virsh.suspend(self.name, uri=self.connect_uri, ignore_statues=False)
+            return True
+        except:
+            logging.error("VM %s failed to suspend", self.name)
+            return False
 
 
     def resume(self):
@@ -1327,12 +1336,12 @@ class VM(virt_vm.BaseVM):
         """
         Override BaseVM save_to_file method
         """
-        state = virsh.domstate(self.name)
+        state = virsh.domstate(self.name).stdout.strip()
         if state not in ('paused',):
             raise virt_vm.VMStatusError("Cannot save a VM that is %s" % state)
         logging.debug("Saving VM %s to %s" %(self.name, path))
         virsh.save(self.name, path, uri=self.connect_uri)
-        state = virsh.domstate(self.name)
+        state = virsh.domstate(self.name).stdout.strip()
         if state not in ('shut off',):
             raise virt_vm.VMStatusError("VM not shut off after save")
 
@@ -1341,7 +1350,7 @@ class VM(virt_vm.BaseVM):
         """
         Override BaseVM restore_from_file method
         """
-        state = virsh.domstate(self.name)
+        state = virsh.domstate(self.name).stdout.strip()
         if state not in ('shut off',):
             raise virt_vm.VMStatusError("Can not restore VM that is %s" % state)
         logging.debug("Restoring VM from %s" % path)
@@ -1397,3 +1406,43 @@ class VM(virt_vm.BaseVM):
         dominfo_dict = self.dominfo()
         memory = dominfo_dict['Used memory'].split(' ')[0] # strip off ' kb'
         return int(memory)
+
+
+    def get_blk_devices(self):
+        """
+        Get vm's block devices.
+
+        Return a dict include all devices detail info.
+        example:
+        {target: {'type': value, 'device': value, 'source': value}}
+        """
+        domblkdict = {}
+        options = "--details"
+        result = virsh.domblklist(self.name, options, ignore_status=True,
+                                  uri=self.connect_uri)
+        blklist = result.stdout.strip().splitlines()
+        if result.exit_status != 0:
+            logging.info("Get vm devices failed.")
+        else:
+            blklist = blklist[2:]
+            for line in blklist:
+                linesplit = line.split(None, 4)
+                target = linesplit[2]
+                blk_detail = {'type': linesplit[0],
+                              'device': linesplit[1],
+                              'source': linesplit[3]}
+                domblkdict[target] = blk_detail
+        return domblkdict
+
+
+    def get_disk_devices(self):
+        """
+        Get vm's disk type block devices.
+        """
+        blk_devices = self.get_blk_devices()
+        disk_devices = {}
+        for target in blk_devices:
+            details = blk_devices[target]
+            if details['device'] == "disk":
+                disk_devices[target] = details
+        return disk_devices
