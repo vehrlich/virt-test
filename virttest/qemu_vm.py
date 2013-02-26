@@ -972,7 +972,16 @@ class VM(virt_vm.BaseVM):
                 cmd += " -device usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,debug=3" % (i, i) 
             return cmd
         
-        def add_usb_redirection_device(device, device_size):
+        def add_usb_redirection_device(device, device_size, device_name):
+            """
+            On Host creates file with device_size and creates partition named as device_name.
+            Also extends qemu-kvm command with usbdevice options to emulate USB device with
+            this created file.
+
+            @param device: file to emulate USB device
+            @param device_size: size of file to create
+            @param device_name: name of partition in the file
+            """
             os.system("rm -rf %s" % device)
             logging.debug("Creating device %s" % device)
             os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
@@ -1544,10 +1553,11 @@ class VM(virt_vm.BaseVM):
             config_path = utils_misc.get_path(root_dir, config_file)
             qemu_cmd += add_usb_redirection(config_path, devices_num)
             
-        if params.get("usb_redirection_device", "no") == "yes":
-            usb_device = params.get("usb_redirection_device", "/tmp/usb.raw")
+        if params.get("usb_redirection_add_device", "no") == "yes":
+            usb_device = params.get("usb_redirection_device")
             device_size = params.get("device_size")
-            qemu_cmd += add_usb_redirection_device(usb_device, device_size)  
+            device_name = params.get("device_name")
+            qemu_cmd += add_usb_redirection_device(usb_device, device_size, device_name)
 
         return qemu_cmd
 
