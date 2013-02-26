@@ -139,6 +139,13 @@ def launch_rv(client_vm, guest_vm, params):
     else:
         raise Exception("Unsupported display value")
 
+    #usbredirection support
+    if params.get("usb_redirection_add_device_vm2") == "yes":
+        logging.info("USB redirection set auto redirect on connect for device class 0x08")
+        cmd += " --spice-usbredir-redirect-on-connect=\"0x08,-1,-1,-1,1\""
+    else:
+        logging.info("No USB redirection")
+
     # Check to see if the test is using the full screen option.
     if full_screen == "yes":
         logging.info("Remote Viewer Set to use Full Screen")
