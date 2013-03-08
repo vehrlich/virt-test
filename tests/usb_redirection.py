@@ -70,6 +70,20 @@ def create_random_file(session, path, size):
     session.cmd("dd if=/dev/random of=%s bs=%s count=1" % (path, size))
     session.cmd("md5sum %s" % path)
 
+def wait_for_usb(session, path):
+    """
+    Wait for user auto mount (gnome). Checks if path exists. If not
+    wait_timeout (three times - 15 s)
+    """
+    for i in range(1,3):
+        try:
+            session.cmd("ls %s" % path)
+        except:
+            utils_spice.wait_timeout(10)
+        else:
+            return True
+    return False
+
 def run_usb_redirection(test, params, env):
     """
     Test for USB connection
@@ -78,6 +92,9 @@ def run_usb_redirection(test, params, env):
     files. Client VM is started with emulated USB device.
 
     This test copy data from client to guest in both ways.
+    
+    #TODO paths are hardcoded this will be problem with Windows USB redir. Make
+    #it more sophisticated.
 
     @param test: KVM test object.
     @param params: Dictionary with the test parameters.
@@ -94,8 +111,11 @@ def run_usb_redirection(test, params, env):
             timeout=int(params.get("login_timeout", 360)))
     utils_spice.launch_startx(guest_vm)
     utils_spice.wait_timeout(10)
+    wait_for_usb(guest_session, "/media/test")
+        
     #create file on guest
-    guest_session.cmd("dd if=/dev/random of=%s bs=%s count=1" % ("/tmp/test.file", 4))
+    guest_session.cmd("dd if=/dev/random of=%s bs=%s count=1" %
+                      ("/tmp/test.file", "4M"))
     md5sum_guest = guest_session.cmd("md5sum %s" % "/tmp/test.file")
     logging.info("MD5SUM on guest: %s" % md5sum_guest)
     #copy file on USB
