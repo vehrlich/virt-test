@@ -1,4 +1,4 @@
-import os, logging, imp, sys, time, traceback, Queue, glob, shutil, inspect
+import os, logging, imp, sys, time, traceback, Queue, glob, shutil
 from autotest.client.shared import error
 from autotest.client import utils
 import utils_misc, utils_params, utils_env, env_process, data_dir, bootstrap
@@ -138,14 +138,17 @@ class Test(object):
                         if not os.path.isdir(subtestdir):
                             raise error.TestError("Directory %s does not "
                                                   "exist" % (subtestdir))
-                        subtest_dirs.append(subtestdir)
+                        subtest_dirs += data_dir.SubdirList(subtestdir,
+                                                         bootstrap.test_filter)
 
                     # Verify if we have the correspondent source file for it
-                    subtest_dirs.append(self.testdir)
+                    subtest_dirs += data_dir.SubdirList(self.testdir,
+                                                        bootstrap.test_filter)
                     specific_testdir = os.path.join(self.bindir,
                                                     params.get("vm_type"),
                                                     "tests")
-                    subtest_dirs.append(specific_testdir)
+                    subtest_dirs += data_dir.SubdirList(specific_testdir,
+                                                        bootstrap.test_filter)
                     logging.debug("Searching subtest files in dirs %s",
                                   subtest_dirs)
                     subtest_dir = None
@@ -232,7 +235,7 @@ class Test(object):
 
 def print_stdout(sr, end=True):
     try:
-        sys.stdout.switch()
+        sys.stdout.restore()
     except AttributeError:
         pass
     if end:
@@ -240,7 +243,7 @@ def print_stdout(sr, end=True):
     else:
         print(sr),
     try:
-        sys.stdout.switch()
+        sys.stdout.redirect()
     except AttributeError:
         pass
 
@@ -260,9 +263,11 @@ class Bcolors(object):
         self.PASS = self.green
         self.SKIP = self.yellow
         self.FAIL = self.red
+        self.ERROR = self.red
         self.WARN = self.yellow
         self.ENDC = self.end
-        allowed_terms = ['linux', 'xterm', 'xterm-256color', 'vt100']
+        allowed_terms = ['linux', 'xterm', 'xterm-256color', 'vt100',
+                         'screen', 'screen-256color']
         term = os.environ.get("TERM")
         if (not os.isatty(1)) or (not term in allowed_terms):
             self.disable()
@@ -277,6 +282,7 @@ class Bcolors(object):
         self.PASS = ''
         self.SKIP = ''
         self.FAIL = ''
+        self.ERROR = ''
         self.ENDC = ''
 
 # Instantiate bcolors to be used in the functions below.
@@ -295,6 +301,13 @@ def print_skip():
     Print SKIP to stdout with SKIP (yellow) color.
     """
     print_stdout(bcolors.SKIP + "SKIP" + bcolors.ENDC)
+
+
+def print_error(t_elapsed):
+    """
+    Print ERROR to stdout with ERROR (red) color.
+    """
+    print_stdout(bcolors.ERROR + "ERROR" + bcolors.ENDC + " (%.2f s)" % t_elapsed)
 
 
 def print_pass(t_elapsed):
@@ -318,13 +331,14 @@ def print_warn(t_elapsed):
     print_stdout(bcolors.WARN + "WARN" + bcolors.ENDC + " (%.2f s)" % t_elapsed)
 
 
-def configure_logging():
+def reset_logging():
     """
-    Remove all the handlers on the root logger
+    Remove all the handlers and unset the log level on the root logger.
     """
     logger = logging.getLogger()
     for hdlr in logger.handlers:
         logger.removeHandler(hdlr)
+    logger.setLevel(logging.NOTSET)
 
 
 def configure_console_logging():
@@ -394,6 +408,42 @@ def get_paginator():
     except ValueError:
         return sys.stdout
 
+def get_cartesian_parser_details(cartesian_parser):
+    """
+    Print detailed information about filters applied to the cartesian cfg.
+
+    @param cartesian_parser: Cartesian parser object.
+    """
+    details = ""
+    details += ("Tests produced by config file %s\n\n" %
+                cartesian_parser.filename)
+
+    details += "The full test list was modified by the following:\n\n"
+
+    if cartesian_parser.only_filters:
+        details += "Filters applied:\n"
+        for flt in cartesian_parser.only_filters:
+            details += "    %s\n" % flt
+
+    if cartesian_parser.no_filters:
+        for flt in cartesian_parser.no_filters:
+            details += "    %s\n" % flt
+
+    details += "\n"
+    details += "Different guest OS have different test lists\n"
+    details += "\n"
+
+    if cartesian_parser.assignments:
+        details += "Assignments applied:\n"
+        for flt in cartesian_parser.assignments:
+            details += "    %s\n" % flt
+
+    details += "\n"
+    details += "Assignments override values previously set in the config file\n"
+    details += "\n"
+
+    return details
+
 
 def print_test_list(options, cartesian_parser):
     """
@@ -406,23 +456,16 @@ def print_test_list(options, cartesian_parser):
     """
     pipe = get_paginator()
     index = 0
-    pipe.write("Tests produced by config file %s\n\n" %
-               cartesian_parser.filename)
-    pipe.write("Filters applied according to options:\n")
-    for member in inspect.getmembers(options):
-        name, value = member
-        attribute = getattr(options, name)
-        if not (name.startswith("__") or callable(attribute) or not value):
-            pipe.write("    %s: %s\n" % (name, value))
 
-    pipe.write("\n")
+    pipe.write(get_cartesian_parser_details(cartesian_parser))
+
     d = cartesian_parser.get_dicts().next()
     tag_index = get_tag_index(options, d)
     for params in cartesian_parser.get_dicts():
         virt_test_type = params.get('virt_test_type', "")
         supported_virt_backends = virt_test_type.split(" ")
         if options.type in supported_virt_backends:
-            index +=1
+            index += 1
             shortname = get_tag(params, tag_index)
             needs_root = ((params.get('requires_root', 'no') == 'yes')
                           or (params.get('vm_type') != 'qemu'))
@@ -436,15 +479,25 @@ def print_test_list(options, cartesian_parser):
             pipe.write(out)
 
 
+def get_guest_name_parser(options):
+    cartesian_parser = cartesian_config.Parser()
+    cfgdir = os.path.join(data_dir.get_root_dir(), options.type, "cfg")
+    cartesian_parser.parse_file(os.path.join(cfgdir, "machines.cfg"))
+    cartesian_parser.parse_file(os.path.join(cfgdir, "guest-os.cfg"))
+    if options.arch:
+        cartesian_parser.only_filter(options.arch)
+    if options.machine_type:
+        cartesian_parser.only_filter(options.machine_type)
+    if options.guest_os:
+        cartesian_parser.only_filter(options.guest_os)
+    return cartesian_parser
+
+
 def get_guest_name_list(options):
     global GUEST_NAME_LIST
     if GUEST_NAME_LIST is None:
-        cfg = os.path.join(data_dir.get_root_dir(), options.type,
-                           "cfg", "guest-os.cfg")
-        cartesian_parser = cartesian_config.Parser()
-        cartesian_parser.parse_file(cfg)
         guest_name_list = []
-        for params in cartesian_parser.get_dicts():
+        for params in get_guest_name_parser(options).get_dicts():
             shortname = ".".join(params['name'].split(".")[1:])
             guest_name_list.append(shortname)
 
@@ -463,20 +516,16 @@ def print_guest_list(options):
     @param options: OptParse object with cmdline options.
     @param cartesian_parser: Cartesian parser object with test options.
     """
-    cfg = os.path.join(data_dir.get_root_dir(), options.type,
-                       "cfg", "guest-os.cfg")
-    cartesian_parser = cartesian_config.Parser()
-    cartesian_parser.parse_file(cfg)
     pipe = get_paginator()
     index = 0
     pipe.write("Searched %s for guest images\n" %
                os.path.join(data_dir.get_data_dir(), 'images'))
     pipe.write("Available guests:")
     pipe.write("\n\n")
-    for params in cartesian_parser.get_dicts():
-        index +=1
+    for params in get_guest_name_parser(options).get_dicts():
+        index += 1
         image_name = storage.get_image_filename(params, data_dir.get_data_dir())
-        shortname = ".".join(params['name'].split(".")[1:])
+        shortname = params['shortname']
         if os.path.isfile(image_name):
             out = (bcolors.blue + str(index) + bcolors.end + " " +
                    shortname + "\n")
@@ -509,7 +558,8 @@ def bootstrap_tests(options):
         test_dir = os.path.abspath(parent_config_dir)
 
     if options.type == 'qemu':
-        check_modules = ["kvm", "kvm-%s" % utils_misc.get_cpu_vendor(verbose=False)]
+        check_modules = ["kvm",
+                         "kvm-%s" % utils_misc.get_cpu_vendor(verbose=False)]
     else:
         check_modules = None
     online_docs_url = "https://github.com/autotest/virt-test/wiki"
@@ -537,11 +587,13 @@ def bootstrap_tests(options):
         if t_elapsed > tolerance and not wait_message_printed:
             print_stdout("Running setup. Please wait...")
             wait_message_printed = True
-            sys.stdout.switch()
+            # if bootstrap takes too long, we temporarily make stdout verbose
+            # again, so the user can see what's taking so long
+            sys.stdout.restore()
         time.sleep(0.1)
 
-    if wait_message_printed:
-        sys.stdout.switch()
+    # in case stdout was restored above, redirect it again
+    sys.stdout.redirect()
 
     reason = None
     try:
@@ -563,6 +615,49 @@ def bootstrap_tests(options):
         sys.exit(-1)
 
     return True
+
+
+def _job_report(job_elapsed_time, n_tests, n_tests_skipped, n_tests_failed):
+    """
+    Print to stdout and run log stats of our test job.
+
+    @param job_elapsed_time: Time it took for the tests to execute.
+    @param n_tests: Total Number of tests executed.
+    @param n_tests_skipped: Total Number of tests skipped.
+    @param n_tests_passed: Number of tests that passed.
+    """
+    minutes, seconds = divmod(job_elapsed_time, 60)
+    hours, minutes = divmod(minutes, 60)
+
+    pretty_time = ""
+    if hours:
+        pretty_time += "%02d:" % hours
+    if hours or minutes:
+        pretty_time += "%02d:" % minutes
+    pretty_time += "%02d" % seconds
+
+    total_time_str = "TOTAL TIME: %.2f s" % job_elapsed_time
+    if hours or minutes:
+        total_time_str += " (%s)" % pretty_time
+
+    print_header(total_time_str)
+    logging.info("Job total elapsed time: %.2f s", job_elapsed_time)
+
+    n_tests_passed = n_tests - n_tests_skipped - n_tests_failed
+    success_rate = ((float(n_tests_passed) /
+                     float(n_tests - n_tests_skipped)) * 100)
+
+    print_header("TESTS PASSED: %d" % n_tests_passed)
+    print_header("TESTS FAILED: %d" % n_tests_failed)
+    if n_tests_skipped:
+        print_header("TESTS SKIPPED: %d" % n_tests_skipped)
+    print_header("SUCCESS RATE: %.2f %%" % success_rate)
+
+    logging.info("Tests passed: %d", n_tests_passed)
+    logging.info("Tests failed: %d", n_tests_failed)
+    if n_tests_skipped:
+        logging.info("Tests skipped: %d", n_tests_skipped)
+    logging.info("Success rate: %.2f %%", success_rate)
 
 
 def run_tests(parser, options):
@@ -588,11 +683,8 @@ def run_tests(parser, options):
 
     last_index = -1
 
-    logging.info("Starting test job at %s" % time.strftime('%Y-%m-%d %H:%M:%S'))
+    logging.info("Starting test job at %s", time.strftime('%Y-%m-%d %H:%M:%S'))
     logging.info("")
-    logging.debug("Options received from the command line:")
-    utils_misc.display_attributes(options)
-    logging.debug("")
 
     logging.debug("Cleaning up previous job tmp files")
     d = parser.get_dicts().next()
@@ -617,19 +709,16 @@ def run_tests(parser, options):
         qemu_img.backup_image(d, data_dir.get_data_dir(), 'backup', True)
         logging.debug("")
 
-    if options.type == 'qemu':
-        logging.info("We're running the qemu test with:")
-        logging.info("qemu binary: %s" % d.get('qemu_binary'))
-        logging.info("qemu img binary: %s" % d.get('qemu_img_binary'))
-        logging.info("qemu io binary: %s" % d.get('qemu_io_binary'))
-        logging.info("")
-
     tag_index = get_tag_index(options, d)
+
+    for line in get_cartesian_parser_details(parser).splitlines():
+        logging.info(line)
+
     logging.info("Defined test set:")
     for i, d in enumerate(parser.get_dicts()):
         shortname = get_tag(d, tag_index)
 
-        logging.info("Test %4d:  %s" % (i + 1, shortname))
+        logging.info("Test %4d:  %s", i + 1, shortname)
         last_index += 1
 
     if last_index == -1:
@@ -640,6 +729,8 @@ def run_tests(parser, options):
     logging.info("")
 
     n_tests = last_index + 1
+    n_tests_failed = 0
+    n_tests_skipped = 0
     print_header("TESTS: %s" % n_tests)
 
     status_dct = {}
@@ -654,6 +745,7 @@ def run_tests(parser, options):
     index = 0
     setup_flag = 1
     cleanup_flag = 2
+    job_start_time = time.time()
     for dct in parser.get_dicts():
         shortname = get_tag(dct, tag_index)
 
@@ -701,13 +793,23 @@ def run_tests(parser, options):
                     t_begin = time.time()
                     t.start_file_logging()
                     current_status = t.run_once()
-                    logging.info("PASS %s" % t.tag)
+                    logging.info("PASS %s", t.tag)
                     logging.info("")
                     t.stop_file_logging()
                 finally:
                     t_end = time.time()
                     t_elapsed = t_end - t_begin
+            except error.TestError, reason:
+                n_tests_failed += 1
+                logging.info("ERROR %s -> %s: %s", t.tag,
+                             reason.__class__.__name__, reason)
+                logging.info("")
+                t.stop_file_logging()
+                print_error(t_elapsed)
+                status_dct[dct.get("name")] = False
+                continue
             except error.TestNAError, reason:
+                n_tests_skipped += 1
                 logging.info("SKIP %s -> %s: %s", t.tag,
                              reason.__class__.__name__, reason)
                 logging.info("")
@@ -725,6 +827,7 @@ def run_tests(parser, options):
                 status_dct[dct.get("name")] = True
                 continue
             except Exception, reason:
+                n_tests_failed += 1
                 exc_type, exc_value, exc_traceback = sys.exc_info()
                 logging.error("")
                 tb_info = traceback.format_exception(exc_type, exc_value,
@@ -754,5 +857,9 @@ def run_tests(parser, options):
             print_pass(t_elapsed)
 
         status_dct[dct.get("name")] = current_status
+
+    job_end_time = time.time()
+    job_elapsed_time = job_end_time - job_start_time
+    _job_report(job_elapsed_time, n_tests, n_tests_skipped, n_tests_failed)
 
     return not failed

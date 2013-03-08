@@ -1,8 +1,7 @@
 import logging, os
 from autotest.client.shared import error
 from autotest.client import utils
-from virttest import utils_test
-from virttest import utils_misc
+from virttest import utils_test, data_dir
 
 CLIENT_TEST = "kernelinstall"
 
@@ -13,8 +12,8 @@ def run_kernel_install(test, params, env):
     1) Log into a guest
     2) Save current default kernel information
     3) Fetch necessary files for guest kernel installation
-    4) Generate contol file for kernelinstall test
-    5) Launch kernel installation (kernelinstall) test in guest
+    4) Generate control file for kernel install test
+    5) Launch kernel installation (kernel install) test in guest
     6) Reboot guest after kernel is installed (optional)
     7) Do sub tests in guest with new kernel (optional)
     8) Restore grub and reboot guest (optional)
@@ -87,6 +86,9 @@ def run_kernel_install(test, params, env):
     timeout = float(params.get("login_timeout", 240))
     session = vm.wait_for_login(timeout=timeout)
 
+    logging.info("Guest kernel before install: %s",
+                 session.cmd('uname -a').strip())
+
     error.context("Save current default kernel information")
     default_kernel = _save_bootloader_config(session)
 
@@ -100,19 +102,14 @@ def run_kernel_install(test, params, env):
     # Env preparation for test.
     install_type = params.get("install_type", "brew")
     sub_test_params = {}
+
     # rpm
-    sub_test_params.update(_build_params("kernel_rpm_path"))
-    sub_test_params.update(_build_params("kernel_deps_rpms"))
+    sub_test_params.update(_build_params('kernel_rpm_path'))
+    sub_test_params.update(_build_params('kernel_deps_rpms'))
 
     # koji
-    if params.get("kernel_koji_tag"):
-        koji_tag = "kernel_koji_tag"
-    else:
-        # Try to get brew tag if not set "kernel_koji_tag" parameter
-        koji_tag = "brew_tag"
-
-    sub_test_params.update(_build_params(koji_tag))
-    sub_test_params.update(_build_params("kernel_dep_pkgs"))
+    sub_test_params.update(_build_params('kernel_deps_koji_spec'))
+    sub_test_params.update(_build_params('kernel_koji_spec'))
 
     # git
     sub_test_params.update(_build_params('kernel_git_repo'))
@@ -121,16 +118,16 @@ def run_kernel_install(test, params, env):
     sub_test_params.update(_build_params('kernel_git_commit'))
     sub_test_params.update(_build_params('kernel_patch_list'))
     sub_test_params.update(_build_params('kernel_config'))
-    sub_test_params.update(_build_params("kernel_config_list"))
+    sub_test_params.update(_build_params('kernel_config_list'))
 
     # src
-    sub_test_params.update(_build_params("kernel_src_pkg"))
-    sub_test_params.update(_build_params("kernel_config", "tests_rsc/config"))
-    sub_test_params.update(_build_params("kernel_patch_list"))
+    sub_test_params.update(_build_params('kernel_src_pkg'))
+    sub_test_params.update(_build_params('kernel_config'))
+    sub_test_params.update(_build_params('kernel_patch_list'))
 
-    tag = params.get("kernel_tag")
+    tag = params.get('kernel_tag')
 
-    error.context("Generate contol file for kernelinstall test")
+    error.context("Generate control file for kernel install test")
     #Generate control file from parameters
     control_base = "params = %s\n"
     control_base += "job.run_test('kernelinstall'"
@@ -140,10 +137,9 @@ def run_kernel_install(test, params, env):
         control_base += ", tag='%s'" % tag
     control_base += ")"
 
-    virt_dir = os.path.dirname(utils_misc.__file__)
+    control_dir = os.path.join(data_dir.get_root_dir(), "shared", "control")
     test_control_file = "kernel_install.control"
-    test_control_path = os.path.join(virt_dir, "autotest_control",
-                                     test_control_file)
+    test_control_path = os.path.join(control_dir, test_control_file)
 
     control_str = control_base % sub_test_params
     try:
@@ -195,6 +191,10 @@ def run_kernel_install(test, params, env):
             raise error.TestFail("Fail to restore to default kernel,"
                                  " error message:\n '%s'" % e)
         vm.reboot()
+
+    session = vm.wait_for_login(timeout=timeout)
+    logging.info("Guest kernel after install: %s",
+                 session.cmd('uname -a').strip())
 
     # Finally, let me clean up the tmp files.
     _clean_up_tmp_files(_tmp_file_list)

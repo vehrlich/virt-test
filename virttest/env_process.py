@@ -1,9 +1,9 @@
 import os, time, commands, re, logging, glob, threading, shutil, sys
 from autotest.client import utils
 from autotest.client.shared import error
-import aexpect, qemu_monitor, ppm_utils, test_setup, virt_vm, qemu_vm
+import aexpect, qemu_monitor, ppm_utils, test_setup, virt_vm
 import libvirt_vm, video_maker, utils_misc, storage, qemu_storage
-import remote, ovirt, data_dir, utils_test
+import remote, data_dir, utils_test
 
 try:
     import PIL.Image
@@ -46,7 +46,6 @@ def preprocess_image(test, params, image_name):
             if not image.create(params):
                 raise error.TestError("Could not create image")
 
-
 def preprocess_vm(test, params, env, name):
     """
     Preprocess a single VM object according to the instructions in params.
@@ -61,16 +60,7 @@ def preprocess_vm(test, params, env, name):
     vm_type = params.get('vm_type')
     target = params.get('target')
     if not vm:
-        if vm_type == 'qemu':
-            vm = qemu_vm.VM(name, params, test.bindir, env.get("address_cache"))
-        if vm_type == 'libvirt':
-            vm = libvirt_vm.VM(name, params, test.bindir, env.get("address_cache"))
-        if vm_type == 'v2v':
-            if target == 'libvirt' or target is None:
-                vm = libvirt_vm.VM(name, params, test.bindir, env.get("address_cache"))
-            if target == 'ovirt':
-                vm = ovirt.VMManager(name, params, test.bindir, env.get("address_cache"))
-        env.register_vm(name, vm)
+        vm = env.create_vm(vm_type, target, name, params, test.bindir)
 
     remove_vm = False
     if params.get("force_remove_vm") == "yes":
@@ -263,12 +253,14 @@ def process(test, params, env, image_func, vm_func, vm_first=False):
                 for image_name in vm_params.objects("images"):
                     image_params = vm_params.object_params(image_name)
                     # Call image_func for each image
-                    if vm is not None and vm.is_alive():
+                    unpause_vm = False
+                    if vm is not None and vm.is_alive() and not vm.is_paused():
                         vm.pause()
+                        unpause_vm = True
                     try:
                         image_func(test, image_params, image_name)
                     finally:
-                        if vm is not None and vm.is_alive():
+                        if unpause_vm:
                             vm.resume()
         else:
             for image_name in params.objects("images"):
@@ -437,6 +429,7 @@ def preprocess(test, params, env):
         global _screendump_thread, _screendump_thread_termination_event
         _screendump_thread_termination_event = threading.Event()
         _screendump_thread = threading.Thread(target=_take_screendumps,
+                                              name='ScreenDump',
                                               args=(test, params, env))
         _screendump_thread.start()
 
@@ -657,3 +650,6 @@ def _take_screendumps(test, params, env):
                 _screendump_thread_termination_event = None
                 break
             _screendump_thread_termination_event.wait(delay)
+        else:
+            # Exit event was deleted, exit this thread
+            break

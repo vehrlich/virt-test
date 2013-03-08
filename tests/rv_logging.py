@@ -7,7 +7,6 @@ Requires: connected binaries remote-viewer, Xorg, gnome session
 
 """
 import logging, os
-from virttest.aexpect import ShellCmdError, ShellStatusError, ShellTimeoutError
 from autotest.client.shared import error
 from virttest import utils_misc, utils_spice
 
