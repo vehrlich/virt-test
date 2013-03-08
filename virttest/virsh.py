@@ -447,15 +447,22 @@ def vcpupin(vm_name, vcpu, cpu, **dargs):
 
 def vcpuinfo(vm_name, **dargs):
     """
-    Prints the vcpuinfo of a given domain.
+    Retrieves the vcpuinfo command result if values not "N/A"
 
     @param: vm_name: name of domain
     @param: dargs: standardized virsh function API keywords
-    @return: standard output from command
+    @return: CmdResult object
     """
-
-    cmd_vcpuinfo = "vcpuinfo %s" % vm_name
-    return command(cmd_vcpuinfo, **dargs).stdout.strip()
+    # Guarantee cmdresult object created
+    dargs['ignore_status'] = True
+    cmdresult = command("vcpuinfo %s" % vm_name, **dargs)
+    if cmdresult.exit_status == 0:
+        # Non-running vm makes virsh exit(0) but have "N/A" info.
+        # on newer libvirt.  Treat this as an error.
+        if re.search(r"\s*CPU:\s+N/A\s*", cmdresult.stdout.strip()):
+            cmdresult.exit_status = -1
+            cmdresult.stdout += "\n\nvirsh.vcpuinfo inject error: N/A values\n"
+    return cmdresult
 
 
 def vcpucount_live(vm_name, **dargs):
@@ -596,25 +603,26 @@ def domstate(name, **dargs):
     return command("domstate %s" % name, **dargs)
 
 
-def domid(name, **dargs):
+def domid(vm_name, **dargs):
     """
     Return VM's ID.
 
-    @param name: VM name
+    @param vm_name: VM name or uuid
     @param: dargs: standardized virsh function API keywords
-    @return: standard output from command
+    @return: CmdResult instance
     """
-    return command("domid %s" % (name), **dargs).stdout.strip()
+    return command("domid %s" % (vm_name), **dargs)
 
 
-def dominfo(name, **dargs):
+def dominfo(vm_name, **dargs):
     """
     Return the VM information.
 
+    @param: vm_name: VM's name or id,uuid.
     @param: dargs: standardized virsh function API keywords
-    @return: standard output from command
+    @return: CmdResult instance
     """
-    return command("dominfo %s" % (name), **dargs).stdout.strip()
+    return command("dominfo %s" % (vm_name), **dargs)
 
 
 def domuuid(name, **dargs):
@@ -623,9 +631,9 @@ def domuuid(name, **dargs):
 
     @param name: VM name
     @param: dargs: standardized virsh function API keywords
-    @return: standard output from command
+    @return: CmdResult instance
     """
-    return command("domuuid %s" % name, **dargs).stdout.strip()
+    return command("domuuid %s" % name, **dargs)
 
 
 def screenshot(name, filename, **dargs):
@@ -744,6 +752,17 @@ def domxml_to_native(format, file, options, **dargs):
     """
     cmd = "domxml-to-native %s %s %s" % (format, file, options)
     return command(cmd, **dargs)
+
+
+def vncdisplay(vm_name,  **dargs):
+    """
+    Output the IP address and port number for the VNC display.
+
+    @param vm_name: VM's name or id,uuid.
+    @param dargs: standardized virsh function API keywords.
+    @return: result from command
+    """
+    return command("vncdisplay %s" % vm_name, **dargs)
 
 
 def is_alive(name, **dargs):
@@ -1518,6 +1537,22 @@ def domblklist(name, options=None, **dargs):
     @return: CmdResult instance
     """
     cmd = "domblklist %s" % name
+    if options:
+        cmd += " %s" % options
+
+    return command(cmd, **dargs)
+
+
+def cpu_stats(name, options, **dargs):
+    """
+    Display per-CPU and total statistics about domain's CPUs
+
+    @param name: name of domain
+    @param options: options of cpu_stats
+    @param dargs: standardized virsh function API keywords
+    @return: CmdResult instance
+    """
+    cmd = "cpu-stats %s" % name
     if options:
         cmd += " %s" % options
 

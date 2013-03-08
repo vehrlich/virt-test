@@ -12,7 +12,7 @@ def run_virsh_managedsave(test, params, env):
     from the same state at a later time.
     """
 
-    vm_name = params.get("main_vm", "vm1")
+    vm_name = params.get("main_vm")
     vm = env.get_vm(params["main_vm"])
 
     #define function
@@ -34,8 +34,8 @@ def run_virsh_managedsave(test, params, env):
         if  not re.search(guest_name, ret.stdout):
             raise error.TestFail("virsh list output invalid")
 
-    domid = virsh.domid(vm_name).strip()
-    domuuid = virsh.domuuid(vm_name).strip()
+    domid = vm.get_id()
+    domuuid = vm.get_uuid()
 
     libvirtd = params.get("managedsave_libvirtd","on")
 

@@ -169,8 +169,7 @@ class VM(virt_vm.BaseVM):
         """
         if not self.is_alive():
             raise virt_vm.VMDeadError("Domain %s is inactive" % self.name,
-                                      virsh.domstate(self.name,
-                                      uri=self.connect_uri).stdout.strip())
+                                      self.state())
 
 
     def is_alive(self):
@@ -187,13 +186,20 @@ class VM(virt_vm.BaseVM):
         return virsh.is_dead(self.name, uri=self.connect_uri)
 
 
+    def is_paused(self):
+        """
+        Return True if VM is paused.
+        """
+        return (self.state() == "paused")
+
+
     def is_persistent(self):
         """
         Return True if VM is persistent.
         """
         try:
             return bool(re.search(r"^Persistent:\s+[Yy]es",
-                        virsh.dominfo(self.name, uri=self.connect_uri),
+                virsh.dominfo(self.name, uri=self.connect_uri).stdout.strip(),
                         re.MULTILINE))
         except error.CmdError:
             return False
@@ -238,7 +244,7 @@ class VM(virt_vm.BaseVM):
         """
         Return VM's ID.
         """
-        return virsh.domid(self.name, uri=self.connect_uri)
+        return virsh.domid(self.name, uri=self.connect_uri).stdout.strip()
 
 
     def get_xml(self):
@@ -943,7 +949,8 @@ class VM(virt_vm.BaseVM):
             utils_misc.wait_for(func=self.is_alive, timeout=60,
                                 text=("waiting for domain %s to start" %
                                       self.name))
-            self.uuid = virsh.domuuid(self.name, uri=self.connect_uri)
+            self.uuid = virsh.domuuid(self.name,
+                                      uri=self.connect_uri).stdout.strip()
 
             # Establish a session with the serial console
             if self.only_pty == True:
@@ -1099,7 +1106,7 @@ class VM(virt_vm.BaseVM):
         """
         Return VM's UUID.
         """
-        uuid = virsh.domuuid(self.name, uri=self.connect_uri)
+        uuid = virsh.domuuid(self.name, uri=self.connect_uri).stdout.strip()
         # only overwrite it if it's not set
         if self.uuid is None:
             self.uuid = uuid
@@ -1245,7 +1252,8 @@ class VM(virt_vm.BaseVM):
         """
         Starts this VM.
         """
-        self.uuid = virsh.domuuid(self.name, uri=self.connect_uri)
+        self.uuid = virsh.domuuid(self.name,
+                                  uri=self.connect_uri).stdout.strip()
         # Pull in mac addresses from libvirt guest definition
         for index, nic in enumerate(self.virtnet):
             try:
@@ -1262,6 +1270,8 @@ class VM(virt_vm.BaseVM):
             except virt_vm.VMMACAddressMissingError:
                 logging.warning("Nic %d requested by test but not defined for"
                                 " vm %s" % (index, self.name))
+
+        logging.debug("Starting vm '%s'", self.name)
         if virsh.start(self.name, uri=self.connect_uri):
             # Wait for the domain to be created
             has_started = utils_misc.wait_for(func=self.is_alive, timeout=60,
@@ -1270,7 +1280,8 @@ class VM(virt_vm.BaseVM):
             if has_started is None:
                 raise virt_vm.VMStartError(self.name, "libvirt domain not "
                                                       "active after start")
-            self.uuid = virsh.domuuid(self.name, uri=self.connect_uri)
+            self.uuid = virsh.domuuid(self.name,
+                                      uri=self.connect_uri).stdout.strip()
         else:
             raise virt_vm.VMStartError(self.name, "libvirt domain failed "
                                                   "to start")
@@ -1304,7 +1315,7 @@ class VM(virt_vm.BaseVM):
         Shuts down this VM.
         """
         try:
-            if virsh.domstate(self.name).stdout.strip() != 'shut off':
+            if self.state() != 'shut off':
                 virsh.shutdown(self.name, uri=self.connect_uri)
             if self.wait_for_shutdown():
                 logging.debug("VM %s shut down", self.name)
@@ -1319,8 +1330,8 @@ class VM(virt_vm.BaseVM):
 
     def pause(self):
         try:
-            state = virsh.domstate(self.name)
-            if state not in ('paused',):
+            state = self.state()
+            if state != 'paused':
                 virsh.suspend(self.name, uri=self.connect_uri, ignore_statues=False)
             return True
         except:
@@ -1336,12 +1347,12 @@ class VM(virt_vm.BaseVM):
         """
         Override BaseVM save_to_file method
         """
-        state = virsh.domstate(self.name).stdout.strip()
+        state = self.state()
         if state not in ('paused',):
             raise virt_vm.VMStatusError("Cannot save a VM that is %s" % state)
         logging.debug("Saving VM %s to %s" %(self.name, path))
         virsh.save(self.name, path, uri=self.connect_uri)
-        state = virsh.domstate(self.name).stdout.strip()
+        state = self.state()
         if state not in ('shut off',):
             raise virt_vm.VMStatusError("VM not shut off after save")
 
@@ -1350,12 +1361,12 @@ class VM(virt_vm.BaseVM):
         """
         Override BaseVM restore_from_file method
         """
-        state = virsh.domstate(self.name).stdout.strip()
+        state = self.state()
         if state not in ('shut off',):
             raise virt_vm.VMStatusError("Can not restore VM that is %s" % state)
         logging.debug("Restoring VM from %s" % path)
         virsh.restore(path, uri=self.connect_uri)
-        state = virsh.domstate(self.name)
+        state = self.state()
         if state not in ('paused','running'):
             raise virt_vm.VMStatusError("VM not paused after restore, it is %s." %
                    state)
@@ -1372,7 +1383,7 @@ class VM(virt_vm.BaseVM):
         """
         Return a dict include vm's infomation.
         """
-        output = virsh.dominfo(self.name, uri=self.connect_uri)
+        output = virsh.dominfo(self.name, uri=self.connect_uri).stdout.strip()
         # Key: word before ':' | value: content after ':' (stripped)
         dominfo_dict = {}
         for line in output.splitlines():
@@ -1386,7 +1397,8 @@ class VM(virt_vm.BaseVM):
         """
         Return a dict's list include vm's vcpu infomation.
         """
-        output = virsh.vcpuinfo(self.name, uri=self.connect_uri)
+        output = virsh.vcpuinfo(self.name,
+                                uri=self.connect_uri).stdout.strip()
         # Key: word before ':' | value: content after ':' (stripped)
         vcpuinfo_list = []
         vcpuinfo_dict = {}

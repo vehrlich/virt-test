@@ -4,7 +4,7 @@ Utility classes and functions to handle Virtual Machine creation using qemu.
 @copyright: 2008-2009 Red Hat Inc.
 """
 
-import time, os, logging, fcntl, re, commands, errno
+import time, os, logging, fcntl, re, commands
 from autotest.client.shared import error
 from autotest.client import utils
 import utils_misc, virt_vm, test_setup, storage, qemu_monitor, aexpect
@@ -135,6 +135,19 @@ class VM(virt_vm.BaseVM):
         Return True if the qemu process is dead.
         """
         return not self.process or not self.process.is_alive()
+
+
+    def is_paused(self):
+        """
+        Return True if the qemu process is paused ('stop'ed)
+        """
+        if self.is_dead():
+            return False
+        try:
+            self.verify_status("paused")
+            return True
+        except virt_vm.VMStatusError:
+            return False
 
 
     def verify_status(self, status):
@@ -458,7 +471,8 @@ class VM(virt_vm.BaseVM):
 
         def add_smp(help_text):
             smp_str = " -smp %d" % self.cpuinfo.smp
-            if has_option(help_text, "maxcpus=cpus"):
+            smp_pattern = "smp n\[,maxcpus=cpus\].*"
+            if has_option(help_text, smp_pattern):
                 smp_str += ",maxcpus=%d" % self.cpuinfo.maxcpus
             smp_str += ",cores=%d" % self.cpuinfo.cores
             smp_str += ",threads=%d" % self.cpuinfo.threads
@@ -878,9 +892,21 @@ class VM(virt_vm.BaseVM):
         def add_kernel_cmdline(help_text, cmdline):
             return " -append '%s'" % cmdline
 
-        def add_testdev(help_text, filename):
-            return (" -chardev file,id=testlog,path=%s"
-                    " -device testdev,chardev=testlog" % filename)
+        def add_testdev(help_text, filename=None):
+            if has_device(device_help, "testdev"):
+                return (" -chardev file,id=testlog,path=%s"
+                        " -device testdev,chardev=testlog" % filename)
+            elif has_device(device_help, "pc-testdev"):
+                return " -device pc-testdev"
+            else:
+                return ""
+
+        def add_isa_debug_exit(help_text, iobase=0xf4, iosize=0x04):
+            if has_device(device_help, "isa-debug-exit"):
+                return (" -device isa-debug-exit,iobase=%s,iosize=%s" %
+                        (iobase, iosize))
+            else:
+                return ""
 
         def add_no_hpet(help_text):
             if has_option(help_text, "no-hpet"):
@@ -1291,11 +1317,17 @@ class VM(virt_vm.BaseVM):
         cpu_model = params.get("cpu_model")
         use_default_cpu_model = True
         if cpu_model:
+            use_default_cpu_model = False
             for model in re.split(",", cpu_model):
-                if model in support_cpu_model:
-                    use_default_cpu_model = False
-                    cpu_model = model
-                    break
+                model = model.strip()
+                if not model in support_cpu_model:
+                    continue
+                cpu_model = model
+                break
+            else:
+                cpu_model = model
+                logging.error("Non existing CPU model %s will be passed "
+                              "to qemu (wrong config or negative test)", model)
 
         if use_default_cpu_model:
             cpu_model = params.get("default_cpu_model")
@@ -1478,6 +1510,11 @@ class VM(virt_vm.BaseVM):
         if params.get("testdev") == "yes":
             qemu_cmd += add_testdev(help_text, vm.get_testlog_filename())
 
+        if params.get("isa_debugexit") == "yes":
+            iobase = params.get("isa_debugexit_iobase")
+            iosize = params.get("isa_debugexit_iosize")
+            qemu_cmd += add_isa_debug_exit(help_text, iobase, iosize)
+
         if params.get("disable_hpet") == "yes":
             qemu_cmd += add_no_hpet(help_text)
 
@@ -1532,16 +1569,27 @@ class VM(virt_vm.BaseVM):
         if bios_path:
             qemu_cmd += " -bios %s" % bios_path
 
-        if (has_option(help_text, "enable-kvm")
-            and params.get("enable_kvm", "yes") == "yes"):
-            qemu_cmd += " -enable-kvm"
+        disable_kvm_option = ""
+        if (has_option(help_text, "no-kvm")):
+            disable_kvm_option = " -no-kvm "
 
-        if (has_option(help_text, "no-kvm") and
-            params.get("disable_kvm", "no") == "yes"):
-            qemu_cmd += " -no-kvm "
+        enable_kvm_option = ""
+        if (has_option(help_text, "enable-kvm")):
+            enable_kvm_option = " -enable-kvm"
 
-        if (has_option(help_text, "no-shutdown") and
-            params.get("disable_shutdown", "no") == "yes"):
+        if (params.get("disable_kvm", "no") == "yes"):
+            params["enable_kvm"] = "no"
+
+        if (params.get("enable_kvm", "yes") == "no"):
+            qemu_cmd += disable_kvm_option
+            logging.debug("qemu will run in TCG mode")
+        else:
+            qemu_cmd += enable_kvm_option
+            logging.debug("qemu will run in KVM mode")
+
+        self.no_shutdown = (has_option(help_text, "no-shutdown") and
+                            params.get("disable_shutdown", "no") == "yes")
+        if self.no_shutdown:
             qemu_cmd += " -no-shutdown "
 
         if params.get("enable_sga") == "yes":
@@ -1950,6 +1998,135 @@ class VM(virt_vm.BaseVM):
             lockfile.close()
 
 
+    def wait_for_status(self, status, timeout, first=0.0, step=1.0, text=None):
+        """
+        Wait until the VM status changes to specified status
+
+        @return: True in case the status has changed before timeout, otherwise
+        return None.
+
+        @param timeout: Timeout in seconds
+        @param first: Time to sleep before first attempt
+        @param steps: Time to sleep between attempts in seconds
+        @param text: Text to print while waiting, for debug purposes
+        """
+        return utils_misc.wait_for(lambda: self.monitor.verify_status(status),
+                                   timeout, first, step, text)
+
+
+    def wait_until_paused(self, timeout):
+        """
+        Wait until the VM is paused.
+
+        @return: True in case the VM is paused before timeout, otherwise
+        return None.
+
+        @param timeout: Timeout in seconds
+        """
+        return self.wait_for_status("paused", timeout)
+
+
+    def wait_until_dead(self, timeout, first=0.0, step=1.0):
+        """
+        Wait until VM is dead.
+
+        @return: True if VM is dead before timeout, otherwise returns None.
+
+        @param timeout: Timeout in seconds
+        @param first: Time to sleep before first attempt
+        @param steps: Time to sleep between attempts in seconds
+        """
+        return utils_misc.wait_for(self.is_dead, timeout, first, step)
+
+
+    def wait_for_shutdown(self, timeout=60):
+        """
+        Wait until guest shuts down.
+
+        Helps until the VM is shut down by the guest.
+
+        @return: True in case the VM was shut down, None otherwise.
+
+        Note that the VM is not necessarily dead when this function returns
+        True. If QEMU is running in -no-shutdown mode, the QEMU process
+        may be still alive.
+        """
+        if self.no_shutdown:
+            return self.wait_until_paused(timeout)
+        else:
+            return self.wait_until_dead(timeout, 1, 1)
+
+
+    def graceful_shutdown(self, timeout=60):
+        """
+        Try to gracefully shut down the VM.
+
+        @return: True if VM was successfully shut down, None otherwise.
+
+        Note that the VM is not necessarily dead when this function returns
+        True. If QEMU is running in -no-shutdown mode, the QEMU process
+        may be still alive.
+        """
+        if self.params.get("shutdown_command"):
+            # Try to destroy with shell command
+            logging.debug("Shutting down VM %s (shell)", self.name)
+            try:
+                session = self.login()
+            except (remote.LoginError, virt_vm.VMError), e:
+                logging.debug(e)
+            else:
+                try:
+                    # Send the shutdown command
+                    session.sendline(self.params.get("shutdown_command"))
+                    if self.wait_for_shutdown(timeout):
+                        return True
+                finally:
+                    session.close()
+
+
+    def _cleanup(self, free_mac_addresses):
+        """
+        Removes VM monitor files.
+
+        @param free_mac_addresses: Whether to release the VM's NICs back
+                to the address pool.
+        """
+        self.monitors = []
+        if self.pci_assignable:
+            self.pci_assignable.release_devs()
+            self.pci_assignable = None
+        if self.process:
+            self.process.close()
+        if self.serial_console:
+            self.serial_console.close()
+        if self.logsessions:
+            for key in self.logsessions:
+                self.logsessions[key].close()
+
+        # Generate the tmp file which should be deleted.
+        file_list = [self.get_testlog_filename()]
+        file_list += self.get_monitor_filenames()
+        file_list += self.get_virtio_port_filenames()
+        file_list += self.get_serial_console_filenames()
+        file_list += self.logs.values()
+
+        for f in file_list:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+        if hasattr(self, "migration_file"):
+            try:
+                os.unlink(self.migration_file)
+            except OSError:
+                pass
+
+        if free_mac_addresses:
+            for nic_index in xrange(0,len(self.virtnet)):
+                self.free_mac_address(nic_index)
+
+
     def destroy(self, gracefully=True, free_mac_addresses=True):
         """
         Destroy the VM.
@@ -1969,92 +2146,52 @@ class VM(virt_vm.BaseVM):
             if self.is_dead():
                 return
 
-            logging.debug("Destroying VM with PID %s", self.get_pid())
+            logging.debug("Destroying VM %s (PID %s)", self.name,
+                          self.get_pid())
 
             kill_timeout = int(self.params.get("kill_timeout", "60"))
 
-            if gracefully and self.params.get("shutdown_command"):
-                # Try to destroy with shell command
-                logging.debug("Trying to shutdown VM with shell command")
-                try:
-                    session = self.login()
-                except (remote.LoginError, virt_vm.VMError), e:
-                    logging.debug(e)
+            if gracefully:
+                self.graceful_shutdown(kill_timeout)
+                if self.is_dead():
+                    logging.debug("VM %s down (shell)", self.name)
+                    return
                 else:
-                    try:
-                        # Send the shutdown command
-                        session.sendline(self.params.get("shutdown_command"))
-                        logging.debug("Shutdown command sent; waiting for VM "
-                                      "to go down")
-                        if utils_misc.wait_for(self.is_dead, kill_timeout,
-                                               1, 1):
-                            logging.debug("VM is down")
-                            return
-                    finally:
-                        session.close()
+                    logging.debug("VM %s failed to go down (shell)", self.name)
 
             if self.monitor:
-                # Try to destroy with a monitor command
-                logging.debug("Trying to kill VM with monitor command")
-                if self.params.get("kill_vm_only_when_paused") == "yes":
-                    try:
-                        if utils_misc.wait_for(
-                                 lambda: self.monitor.verify_status("paused"),
-                                               kill_timeout, 1, 1):
-                            logging.debug("Killing already paused VM '%s'",
-                                          self.name)
-                    except:
-                        logging.info("Killing running VM '%s'", self.name)
+                # Try to finish process with a monitor command
+                logging.debug("Ending VM %s process (monitor)", self.name)
                 try:
                     self.monitor.quit()
                 except qemu_monitor.MonitorError, e:
                     logging.warn(e)
                 else:
                     # Wait for the VM to be really dead
-                    if utils_misc.wait_for(self.is_dead, 5, 0.5, 0.5):
-                        logging.debug("VM is down")
+                    if self.wait_until_dead(5, 0.5, 0.5):
+                        logging.debug("VM %s down (monitor)", self.name)
                         return
+                    else:
+                        logging.debug("VM %s failed to go down (monitor)",
+                                      self.name)
 
             # If the VM isn't dead yet...
-            logging.debug("Cannot quit normally, sending a kill to close the "
-                          "deal")
-            utils_misc.kill_process_tree(self.process.get_pid(), 9)
+            pid = self.process.get_pid()
+            logging.debug("Ending VM %s process (killing PID %s)",
+                          self.name, pid)
+            utils_misc.kill_process_tree(pid, 9)
+
             # Wait for the VM to be really dead
             if utils_misc.wait_for(self.is_dead, 5, 0.5, 0.5):
-                logging.debug("VM is down")
+                logging.debug("VM %s down (process killed)", self.name)
                 return
 
-            logging.error("Process %s is a zombie!", self.process.get_pid())
+            # If all else fails, we've got a zombie...
+            logging.error("VM %s (PID %s) is a zombie!", self.name,
+                          self.process.get_pid())
 
         finally:
-            self.monitors = []
-            if self.pci_assignable:
-                self.pci_assignable.release_devs()
-                self.pci_assignable = None
-            if self.process:
-                self.process.close()
-            if self.serial_console:
-                self.serial_console.close()
-
-            # Generate the tmp file which should be deleted.
-            file_list = [self.get_testlog_filename()]
-            file_list += self.get_monitor_filenames()
-            file_list += self.get_virtio_port_filenames()
-            file_list += self.get_serial_console_filenames()
-
-            for f in file_list:
-                try:
-                    os.unlink(f)
-                except OSError:
-                    pass
-            if hasattr(self, "migration_file"):
-                try:
-                    os.unlink(self.migration_file)
-                except OSError:
-                    pass
-            if free_mac_addresses:
-                for nic_index in xrange(0,len(self.virtnet)):
-                    self.free_mac_address(nic_index)
+            self._cleanup(free_mac_addresses)
 
 
     @property
@@ -2519,8 +2656,6 @@ class VM(virt_vm.BaseVM):
             raise virt_vm.VMMigrateProtoUnsupportedError
 
         error.base_context("migrating '%s'" % self.name)
-
-
 
         local = dest_host == "localhost"
         mig_fd_name = None

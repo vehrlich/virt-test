@@ -8,7 +8,7 @@ This exports:
 import logging, os
 from autotest.client.shared import error
 from autotest.client import utils
-import utils_misc, virt_vm, storage
+import utils_misc, virt_vm, storage, data_dir
 
 
 class QemuImg(storage.QemuImg):
@@ -24,7 +24,10 @@ class QemuImg(storage.QemuImg):
         @param tag: Image tag defined in parameter images
         """
         storage.QemuImg.__init__(self, params, root_dir, tag)
-        self.image_cmd = utils_misc.get_path(root_dir,
+        # qemu img binary can be found in the test dir, not data_dir
+        qemu_img_base_dir = os.path.join(data_dir.get_root_dir(),
+                                         params.get("vm_type"))
+        self.image_cmd = utils_misc.get_path(qemu_img_base_dir,
                                  params.get("qemu_img_binary","qemu-img"))
 
 
@@ -262,6 +265,20 @@ class QemuImg(storage.QemuImg):
         else:
             logging.debug("Image file %s not found", self.image_filename)
 
+
+    def info(self):
+        """
+        Run qemu-img info command on image file and return its output.
+        """
+        logging.debug("Run qemu-img info comamnd on %s", self.image_filename)
+        cmd = self.image_cmd
+        if os.path.exists(self.image_filename):
+            cmd += " info %s" % self.image_filename
+            output = utils.system_output(cmd)
+        else:
+            logging.debug("Image file %s not found", self.image_filename)
+            output = None
+        return output
 
 
     def check_image(self, params, root_dir):

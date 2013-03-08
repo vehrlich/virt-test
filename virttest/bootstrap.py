@@ -35,6 +35,8 @@ last_subtest = {'qemu': ['shutdown'],
                 'v2v': ['shutdown'],
                 'libguestfs': ['shutdown']}
 
+test_filter = ['__init__', 'cfg']
+config_filter = ['__init__',]
 
 def get_asset_info(asset):
     asset_path = os.path.join(data_dir.get_download_dir(), '%s.ini' % asset)
@@ -87,6 +89,7 @@ def download_file(asset, interactive=False):
              False, if file didn't have to be downloaded
     """
     file_ok = False
+    problems_ignored = False
     had_to_download = False
     sha1 = None
 
@@ -134,26 +137,49 @@ def download_file(asset, interactive=False):
         if answer == 'y':
             actual_sha1 = utils.hash_file(destination, method='sha1')
             if actual_sha1 != sha1:
-                logging.error("Actual SHA1 sum: %s", actual_sha1)
+                logging.info("Actual SHA1 sum: %s", actual_sha1)
                 if interactive:
                     answer = utils.ask("The file seems corrupted or outdated. "
                                        "Would you like to download it?")
                 else:
+                    logging.info("The file seems corrupted or outdated")
                     answer = 'y'
                 if answer == 'y':
                     logging.info("Updating image to the latest available...")
-                    utils.interactive_download(url, destination, title)
-                    had_to_download = True
-                    file_ok = True
+                    while not file_ok:
+                        utils.interactive_download(url, destination, title)
+                        sha1_post_download = utils.hash_file(destination,
+                                                             method='sha1')
+                        had_to_download = True
+                        if sha1_post_download != sha1:
+                            logging.error("Actual SHA1 sum: %s", actual_sha1)
+                            if interactive:
+                                answer = utils.ask("The file downloaded %s is "
+                                                   "corrupted. Would you like "
+                                                   "to try again?" %
+                                                   destination)
+                            else:
+                                answer = 'n'
+                            if answer == 'n':
+                                problems_ignored = True
+                                logging.error("File %s is corrupted" %
+                                              destination)
+                                file_ok = True
+                            else:
+                                file_ok = False
+                        else:
+                            file_ok = True
             else:
                 file_ok = True
                 logging.info("SHA1 sum check OK")
         else:
+            problems_ignored = True
             logging.info("File %s present, but did not verify integrity",
                          destination)
 
     if file_ok:
-        logging.info("%s present, with proper checksum", destination)
+        if not problems_ignored:
+            logging.info("%s present, with proper checksum", destination)
 
     return had_to_download
 
@@ -348,9 +374,13 @@ def create_subtests_cfg(t_type):
     root_dir = data_dir.get_root_dir()
 
     specific_test = os.path.join(root_dir, t_type, 'tests')
-    specific_test_list = glob.glob(os.path.join(specific_test, '*.py'))
+    specific_test_list = data_dir.SubdirGlobList(specific_test,
+                                                 '*.py',
+                                                 test_filter)
     shared_test = os.path.join(root_dir, 'tests')
-    shared_test_list = glob.glob(os.path.join(shared_test, '*.py'))
+    shared_test_list = data_dir.SubdirGlobList(shared_test,
+                                               '*.py',
+                                               test_filter)
     all_specific_test_list = []
     for test in specific_test_list:
         basename = os.path.basename(test)
@@ -370,7 +400,9 @@ def create_subtests_cfg(t_type):
                                    'tests', 'cfg')
     shared_test_cfg = os.path.join(root_dir, 'tests', 'cfg')
 
-    shared_file_list = glob.glob(os.path.join(shared_test_cfg, "*.cfg"))
+    shared_file_list = data_dir.SubdirGlobList(shared_test_cfg,
+                                               "*.cfg",
+                                               config_filter)
     first_subtest_file = []
     last_subtest_file = []
     non_dropin_tests = []
@@ -404,7 +436,9 @@ def create_subtests_cfg(t_type):
     shared_file_list = tmp
     shared_file_list.sort()
 
-    specific_file_list = glob.glob(os.path.join(specific_test_cfg, "*.cfg"))
+    specific_file_list = data_dir.SubdirGlobList(specific_test_cfg,
+                                                 "*.cfg",
+                                                 config_filter)
     tmp = []
     for shared_file in specific_file_list:
         shared_file_obj = open(shared_file, 'r')
@@ -473,7 +507,9 @@ def create_config_files(test_dir, shared_dir, interactive, step=None,
     logging.info("")
     step += 1
     logging.info("%d - Generating config set", step)
-    config_file_list = glob.glob(os.path.join(test_dir, "cfg", "*.cfg"))
+    config_file_list = data_dir.SubdirGlobList(os.path.join(test_dir, "cfg"),
+                                               "*.cfg",
+                                               config_filter)
     config_file_list_shared = glob.glob(os.path.join(shared_dir, "cfg",
                                                      "*.cfg"))
 
@@ -501,8 +537,8 @@ def create_config_files(test_dir, shared_dir, interactive, step=None,
             diff_result = utils.run("diff -Naur %s %s" % (dst_file, src_file),
                                     ignore_status=True, verbose=False)
             if diff_result.exit_status != 0:
-                logging.info("%s result:\n %s" %
-                              (diff_result.command, diff_result.stdout))
+                logging.info("%s result:\n %s",
+                              diff_result.command, diff_result.stdout)
                 if interactive:
                     answer = utils.ask("Config file  %s differs from %s."
                                        "Overwrite?" % (dst_file, src_file))
@@ -512,13 +548,13 @@ def create_config_files(test_dir, shared_dir, interactive, step=None,
                     answer = "n"
 
                 if answer == "y":
-                    logging.debug("Restoring config file %s from sample" %
+                    logging.debug("Restoring config file %s from sample",
                                   dst_file)
                     shutil.copyfile(src_file, dst_file)
                 else:
-                    logging.debug("Preserving existing %s file" % dst_file)
+                    logging.debug("Preserving existing %s file", dst_file)
             else:
-                logging.debug("Config file %s exists, not touching" % dst_file)
+                logging.debug("Config file %s exists, not touching", dst_file)
 
 
 def bootstrap(test_name, test_dir, base_dir, default_userspace_paths,
@@ -569,7 +605,7 @@ def bootstrap(test_name, test_dir, base_dir, default_userspace_paths,
             logging.debug("Creating %s", sub_dir_path)
             os.makedirs(sub_dir_path)
         else:
-            logging.debug("Dir %s exists, not creating" %
+            logging.debug("Dir %s exists, not creating",
                           sub_dir_path)
 
     create_config_files(test_dir, shared_dir, interactive, step)

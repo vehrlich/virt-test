@@ -10,8 +10,10 @@ import logging
 import os
 import random
 import select
+import sys
 import socket
 import threading
+import traceback
 import time
 from subprocess import Popen
 from autotest.client import utils
@@ -484,7 +486,18 @@ def run_virtio_console(test, params, env):
             raise error.TestFail("Unexpected fail\nMatch: %s\nData:\n%s" %
                                  (match, tmp))
         port.sock.sendall("1234567890")
-        guest_worker.cmd("virt.recv('%s', 10, 1024, False)" % port.name, 10)
+        time.sleep(0.01)
+        try:
+            guest_worker.cmd("virt.recv('%s', 10, 1024, False)"
+                             % port.name, 10)
+        except qemu_virtio_port.VirtioPortException, details:
+            if '[Errno 11] Resource temporarily unavailable' in details:
+                # Give the VM second chance
+                time.sleep(0.01)
+                guest_worker.cmd("virt.recv('%s', 10, 1024, False)"
+                                 % port.name, 10)
+            else:
+                raise details
         cleanup(vm, guest_worker)
 
     @error.context_aware
@@ -1872,5 +1885,13 @@ def run_virtio_console(test, params, env):
         raise error.TestNAError("Test %s doesn't exist. Check 'virtio_console_"
                                 "test' variable in subtest.cfg" % _fce)
     else:
-        fce = locals()[_fce]
-        return fce()
+        try:
+            fce = locals()[_fce]
+            return fce()
+        except Exception, details:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            logging.error("Original traceback:\n" +
+                      "".join(traceback.format_exception(
+                                              exc_type, exc_value,
+                                              exc_traceback.tb_next)))
+            raise error.TestFail('%s failed: %s' % (_fce, details))
