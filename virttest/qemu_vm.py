@@ -2095,6 +2095,17 @@ class VM(virt_vm.BaseVM):
             qemu_cmd += add_watchdog(help_text,
                                      params.get("watchdog_device_type", None),
                                      params.get("watchdog_action", "reset"))
+            
+        if params.get("usb_redirection", "no") == "yes":
+            devices_num = params.get("usb_redirection_devices")
+            config_file = params.get('usb_conf_file')
+            config_path = utils_misc.get_path(root_dir, config_file)
+            qemu_cmd += add_usb_redirection(config_path, devices_num)
+            
+        if params.get("usb_redirection_add_device", "no") == "yes":
+            usb_device = params.get("usb_redirection_device", "/tmp/usb.raw")
+            device_size = params.get("device_size")
+            qemu_cmd += add_usb_redirection_device(usb_device, device_size)  
 
         option_roms = params.get("option_roms")
         if option_roms:
