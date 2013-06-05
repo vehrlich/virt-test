@@ -1219,6 +1219,48 @@ class VM(virt_vm.BaseVM):
             # register this usb controller.
             self.usb_dev_dict[usb_id] = [None] * int(usb_max_port)
             return cmd
+        
+        def add_usb_redirection(conf_file, devices_num=3):
+            """
+            Add functionality or usb redirection according to Hans blog.
+            
+            @param conf_file: path to configuration file
+            @param devices_num: number of devices
+            """  
+
+            if not conf_file:
+                raise error.TestNAError("Configuration file for USB redirection is mandatory")
+
+            if not devices_num:
+                raise error.TestNAError("Number of devices must be set")
+
+            cmd = " -readconfig %s" % conf_file
+
+            for i in range(1, int(devices_num) + 1):
+                cmd += " -chardev spicevmc,name=usbredir,id=usbredirchardev%d" % i
+                cmd += " -device usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,debug=3" % (i, i) 
+            return cmd
+        
+        def add_usb_redirection_device(device, device_size):
+            os.system("rm -rf %s" % device)
+            #check if device exists
+            #device_exists = os.system("ls %" % device)
+            #logging.debug("ls %s:%s" % (device, device_exists))
+            #device_exists2 = os.system("ls kokot")
+            #logging.debug("ls %s:%s" % (device, device_exists2))
+            #create it if not exists
+            #if not device_exists:
+            logging.debug("Creating device %s" % device)
+            os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
+                                            params.get("storage_size", 32)))
+            logging.debug("Creating filesystem ext3 on %s" % device)
+            os.system("mkfs.ext3 -F -L test -q %s " % device)
+            #os.system("chmod 777 %s" % device)
+            
+            return " -usbdevice disk:format=raw:%s" % device
+            """
+            return 
+            """
 
         def add_usbdevice(help_text, usb_dev, usb_type, controller_type,
                           bus=None, port=None):
@@ -1994,6 +2036,17 @@ class VM(virt_vm.BaseVM):
             qemu_cmd += add_watchdog(help_text,
                                      params.get("watchdog_device_type", None),
                                      params.get("watchdog_action", "reset"))
+            
+        if params.get("usb_redirection", "no") == "yes":
+            devices_num = params.get("usb_redirection_devices")
+            config_file = params.get('usb_conf_file')
+            config_path = utils_misc.get_path(root_dir, config_file)
+            qemu_cmd += add_usb_redirection(config_path, devices_num)
+            
+        if params.get("usb_redirection_add_device", "no") == "yes":
+            usb_device = params.get("usb_redirection_device", "/tmp/usb.raw")
+            device_size = params.get("device_size")
+            qemu_cmd += add_usb_redirection_device(usb_device, device_size)  
 
         return qemu_cmd
 
