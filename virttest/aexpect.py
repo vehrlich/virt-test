@@ -638,6 +638,8 @@ class Spawn:
 
         @param cont: String to send to the child process.
         """
+        logging.debug("CONT %s" % cont)
+        logging.debug("LINESEP %s" % self.linesep)
         self.send(cont + self.linesep)
 
 
@@ -1108,12 +1110,15 @@ class Expect(Tail):
         @raise ExpectError: Raised if an unknown error occurs
         """
         def get_last_nonempty_line(cont):
+            logging.debug("CONT: %s"%cont)
             nonempty_lines = [l for l in cont.splitlines() if l.strip()]
+            logging.debug("NONEMPTY_LINES: %s"%nonempty_lines)
+            logging.debug("NONEMPTY_LINE: %s"%nonempty_lines[-1])
             if nonempty_lines:
                 return nonempty_lines[-1]
             else:
                 return ""
-
+        logging.debug("PATTARNS: %s" % patterns)
         return self.read_until_output_matches(patterns, get_last_nonempty_line,
                                               timeout, internal_timeout,
                                               print_func)
@@ -1274,6 +1279,7 @@ class ShellSession(Expect):
                 terminates while waiting for output
         @raise ExpectError: Raised if an unknown error occurs
         """
+        logging.debug("PROMPT: %s" % self.prompt)
         return self.read_until_last_line_matches([self.prompt], timeout,
                                                  internal_timeout,
                                                  print_func)[1]
@@ -1310,7 +1316,10 @@ class ShellSession(Expect):
         self.sendline(cmd)
         try:
             o = self.read_up_to_prompt(timeout, internal_timeout, print_func)
+            logging.debug("O: %s" % o)
+            logging.info("OK")
         except ExpectError, e:
+            logging.info("CIBA")
             o = remove_command_echo(e.output, cmd)
             if isinstance(e, ExpectTimeoutError):
                 raise ShellTimeoutError(cmd, o)
