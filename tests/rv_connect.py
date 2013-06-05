@@ -5,7 +5,7 @@ Requires: binaries remote-viewer, Xorg, netstat
           Use example kickstart RHEL-6-spice.ks
 
 """
-import logging, os
+import logging, os, time
 from virttest.aexpect import ShellStatusError
 from virttest.aexpect import ShellProcessTerminatedError
 from virttest import utils_net, utils_spice, remote
@@ -45,6 +45,20 @@ def killall(client_session, pth):
     execname = pth.split(os.path.sep)[-1]
     client_session.cmd("killall %s &> /dev/null" % execname, ok_status=[0, 1])
 
+def change_rights(vm, params):
+    session = vm.wait_for_login(
+            timeout=int(params.get("login_timeout", 360)),
+            username="root", password="123456")
+
+    #ok lets try to change rights
+    if params.get("usb_redirection_add_device_vm2") == "yes":
+        user_id = session.cmd("id test -u").rstrip('\n')
+        group_id = session.cmd("id test -g").rstrip('\n')
+        lsusb = session.cmd("lsusb")
+        logging.info("lsusb %s" % lsusb)
+        session.cmd("chown %s:%s -R /media/test" % (user_id, group_id))
+        session.cmd("chmod -R 777 /media/test")
+
 
 def launch_rv(client_vm, guest_vm, params):
     """
@@ -66,16 +80,32 @@ def launch_rv(client_vm, guest_vm, params):
     ticket = None
     ticket_send = params.get("spice_password_send")
     qemu_ticket = params.get("qemu_password")
-
+    
+    
     #If qemu_ticket is set, set the password of the VM using the qemu-monitor
     if qemu_ticket:
         guest_vm.monitor.cmd("set_password spice %s" % qemu_ticket)
         logging.info("Sending to qemu monitor: set_password spice %s"
                      % qemu_ticket)
 
+    #client_session = client_vm.wait_for_login(
+    #        timeout=int(params.get("login_timeout", 360)),
+    #        username="root", password="123456")
+    
     client_session = client_vm.wait_for_login(
             timeout=int(params.get("login_timeout", 360)))
-
+    
+    #client_session.cmd("export DISPLAY=:0.0")
+    #client_session.cmd(". /home/test/.dbus/session-bus/`cat /var/lib/dbus/machine-id`-0")
+    #client_session.cmd(". /root/.dbus/session-bus/`cat /var/lib/dbus/machine-id`-0")
+    #client_session.cmd("export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID DBUS_SESSION_BUS_WINDOWID")
+    
+    #user_id = client_session.cmd("id -u").rstrip('\n')
+    #group_id = client_session.cmd("id -g").rstrip('\n')
+    #logging.info("user group %s %s" % (user_id, group_id))
+    #client_session.cmd("export DISPLAY=:0.0")
+    
+    
     if display == "spice":
         ticket = guest_vm.get_spice_var("spice_password")
 
@@ -116,11 +146,18 @@ def launch_rv(client_vm, guest_vm, params):
     else:
         raise Exception("Unsupported display value")
 
+    #usbredirection support
+    if params.get("usb_redirection_add_device_vm2") == "yes":
+        logging.info("USB redirection set auto redirect on connect for device class 0x08")
+        cmd += " --spice-usbredir-redirect-on-connect=\"0x08,-1,-1,-1,1\""
+        #cmd += " --spice-usbredir-redirect-on-connect=\"0x08,0x46f4,0x0001,-1,1\""
+    else:
+        logging.info("No USB redirection")
+
     # Check to see if the test is using the full screen option.
     if full_screen == "yes":
         logging.info("Remote Viewer Set to use Full Screen")
         cmd += " --full-screen"
-
 
     cmd = "nohup " + cmd + " &> /dev/null &" # Launch it on background
 
@@ -189,7 +226,7 @@ def run_rv_connect(test, params, env):
             timeout=int(params.get("login_timeout", 360)))
 
     utils_spice.wait_timeout(15)
-
+    change_rights(client_vm, params)
     launch_rv(client_vm, guest_vm, params)
 
     client_session.close()
