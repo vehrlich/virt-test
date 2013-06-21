@@ -1265,7 +1265,47 @@ class VM(virt_vm.BaseVM):
             # register this usb controller.
             self.usb_dev_dict[usb_id] = [None] * int(usb_max_port)
             return cmd
+        
+        def add_usb_redirection(conf_file, devices_num=3):
+            """
+            Add functionality or usb redirection according to Hans blog.
+            
+            @param conf_file: path to configuration file
+            @param devices_num: number of devices
+            """  
 
+            if not conf_file:
+                raise error.TestNAError("Configuration file for USB redirection is mandatory")
+
+            if not devices_num:
+                raise error.TestNAError("Number of devices must be set")
+
+            cmd = " -readconfig %s" % conf_file
+
+            for i in range(1, int(devices_num) + 1):
+                cmd += " -chardev spicevmc,name=usbredir,id=usbredirchardev%d" % i
+                cmd += " -device usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,debug=3" % (i, i) 
+            return cmd
+        
+        def add_usb_redirection_device(device, device_size):
+            """
+            Created USB device to qemu USB emulation.
+            Does not create device if exists
+            """
+            #ls returns 0 if device exists. Python has 0 as False, shell 0 if
+            #exists
+            exist_device = os.system("ls %s" % device)
+            
+            if exist_device != 0:
+            
+                logging.debug("Creating device %s" % device)
+                os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
+                                            params.get("storage_size", 32)))
+                logging.debug("Creating filesystem ext3 on %s" % device)
+                os.system("mkfs.ext3 -F -L test -q %s " % device)
+            
+            return " -usbdevice disk:format=raw:%s" % device
+            
         def add_usbdevice(help_text, usb_dev, usb_type, controller_type,
                           bus=None, port=None):
             """
