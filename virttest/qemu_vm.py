@@ -1242,26 +1242,24 @@ class VM(virt_vm.BaseVM):
             return cmd
         
         def add_usb_redirection_device(device, device_size):
-            os.system("rm -rf %s" % device)
-            #check if device exists
-            #device_exists = os.system("ls %" % device)
-            #logging.debug("ls %s:%s" % (device, device_exists))
-            #device_exists2 = os.system("ls kokot")
-            #logging.debug("ls %s:%s" % (device, device_exists2))
-            #create it if not exists
-            #if not device_exists:
-            logging.debug("Creating device %s" % device)
-            os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
+            """
+            Created USB device to qemu USB emulation.
+            Does not create device if exists
+            """
+            #ls returns 0 if device exists. Python has 0 as False, shell 0 if
+            #exists
+            exist_device = os.system("ls %s" % device)
+            
+            if exist_device != 0:
+            
+                logging.debug("Creating device %s" % device)
+                os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
                                             params.get("storage_size", 32)))
-            logging.debug("Creating filesystem ext3 on %s" % device)
-            os.system("mkfs.ext3 -F -L test -q %s " % device)
-            #os.system("chmod 777 %s" % device)
+                logging.debug("Creating filesystem ext3 on %s" % device)
+                os.system("mkfs.ext3 -F -L test -q %s " % device)
             
             return " -usbdevice disk:format=raw:%s" % device
-            """
-            return 
-            """
-
+            
         def add_usbdevice(help_text, usb_dev, usb_type, controller_type,
                           bus=None, port=None):
             """
