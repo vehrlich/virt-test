@@ -5,10 +5,10 @@ Requires: binaries remote-viewer, Xorg, netstat
           Use example kickstart RHEL-6-spice.ks
 
 """
-import logging, os, time
+import logging, os
 from virttest.aexpect import ShellStatusError
 from virttest.aexpect import ShellProcessTerminatedError
-from virttest import utils_net, utils_spice, remote
+from virttest import utils_net, utils_spice, remote, utils_misc
 from autotest.client.shared import error
 
 def send_ticket(client_vm, ticket):
@@ -45,22 +45,44 @@ def killall(client_session, pth):
     execname = pth.split(os.path.sep)[-1]
     client_session.cmd("killall %s &> /dev/null" % execname, ok_status=[0, 1])
 
-def change_rights(vm, params):
-    session = vm.wait_for_login(
+
+def check_usb_policy(vm, params):
+    """
+    Check USB policy in polkit file
+    
+    returns status of grep command. If pattern is found 0 is returned. 0 in 
+    python is False so negative of grep is returned 
+    """    
+    logging.info("Checking USB policy")
+    file_name = "/usr/share/polkit-1/actions/org.spice-space.lowlevelusbaccess.policy"
+    cmd = "grep \"<allow_any>yes\" " + file_name
+    client_root_session = vm.wait_for_login(
             timeout=int(params.get("login_timeout", 360)),
             username="root", password="123456")
+    usb_policy = client_root_session.cmd_status(cmd)
 
-    #ok lets try to change rights
-    if params.get("usb_redirection_add_device_vm2") == "yes":
-        user_id = session.cmd("id test -u").rstrip('\n')
-        group_id = session.cmd("id test -g").rstrip('\n')
-        lsusb = session.cmd("lsusb")
-        logging.info("lsusb %s" % lsusb)
-        session.cmd("chown %s:%s -R /media/test" % (user_id, group_id))
-        session.cmd("chmod -R 777 /media/test")
+    logging.info("Policy %s" % usb_policy)
+
+    if usb_policy:
+        return False
+    else:
+        return True
+
+def add_usb_policy(vm, test):
+    """
+    Add USB policy to policykit file
+    """
+    logging.info("Adding USB policy")
+    remote_file_path = "/usr/share/polkit-1/actions/org.spice-space.lowlevelusbaccess.policy"
+    
+    file_to_upload = "deps/org.spice-space.lowlevelusbaccess.policy"
+    file_to_upload_path = utils_misc.get_path(test.virtdir, file_to_upload)
+    logging.debug("Sending %s" % file_to_upload_path)
+    vm.copy_files_to(file_to_upload_path, remote_file_path, username="root",
+                     password="123456")      
 
 
-def launch_rv(client_vm, guest_vm, params):
+def launch_rv(client_vm, guest_vm, test, params):
     """
     Launches rv_binary with args based on spice configuration
     inside client_session on background.
@@ -88,23 +110,8 @@ def launch_rv(client_vm, guest_vm, params):
         logging.info("Sending to qemu monitor: set_password spice %s"
                      % qemu_ticket)
 
-    #client_session = client_vm.wait_for_login(
-    #        timeout=int(params.get("login_timeout", 360)),
-    #        username="root", password="123456")
-    
     client_session = client_vm.wait_for_login(
             timeout=int(params.get("login_timeout", 360)))
-    
-    #client_session.cmd("export DISPLAY=:0.0")
-    #client_session.cmd(". /home/test/.dbus/session-bus/`cat /var/lib/dbus/machine-id`-0")
-    #client_session.cmd(". /root/.dbus/session-bus/`cat /var/lib/dbus/machine-id`-0")
-    #client_session.cmd("export DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID DBUS_SESSION_BUS_WINDOWID")
-    
-    #user_id = client_session.cmd("id -u").rstrip('\n')
-    #group_id = client_session.cmd("id -g").rstrip('\n')
-    #logging.info("user group %s %s" % (user_id, group_id))
-    #client_session.cmd("export DISPLAY=:0.0")
-    
     
     if display == "spice":
         ticket = guest_vm.get_spice_var("spice_password")
@@ -148,9 +155,16 @@ def launch_rv(client_vm, guest_vm, params):
 
     #usbredirection support
     if params.get("usb_redirection_add_device_vm2") == "yes":
-        logging.info("USB redirection set auto redirect on connect for device class 0x08")
+        logging.info("USB redirection set auto redirect on connect for device \
+                    class 0x08")
         cmd += " --spice-usbredir-redirect-on-connect=\"0x08,-1,-1,-1,1\""
-        #cmd += " --spice-usbredir-redirect-on-connect=\"0x08,0x46f4,0x0001,-1,1\""
+
+        if not check_usb_policy(client_vm, params):
+            logging.info("No USB policy.")
+            add_usb_policy(client_vm, test)
+            utils_spice.wait_timeout(3)
+        else:
+            logging.info("USB policy OK")
     else:
         logging.info("No USB redirection")
 
@@ -226,8 +240,7 @@ def run_rv_connect(test, params, env):
             timeout=int(params.get("login_timeout", 360)))
 
     utils_spice.wait_timeout(15)
-    change_rights(client_vm, params)
-    launch_rv(client_vm, guest_vm, params)
+    launch_rv(client_vm, guest_vm, test, params)
 
     client_session.close()
     guest_session.close()
