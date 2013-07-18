@@ -64,8 +64,9 @@ def run_usb_redirection(test, params, env):
                       ("/tmp/test.file", "4M"))
     md5sum_guest = guest_session.cmd("md5sum /tmp/test.file | cut -f1 -d\" \"")
     logging.info("MD5SUM on guest: %s" % md5sum_guest)
-    #copy file from guest to USB(USB is mounted automaticaly to /media )
+    #USB was mounted by root when tested this test. This prevents right issue
     guest_root_session.cmd("chmod 777 /media/test")
+    #copy file from guest to USB(USB is mounted automaticaly to /media )
     guest_session.cmd("cp %s %s" % ("/tmp/test.file", "/media/test/test.file"))
     md5sum_guest_usb = guest_session.cmd("md5sum /media/test/test.file | cut -f1 -d\" \"")
     logging.info("MD5SUM on guest USB: %s" % md5sum_guest_usb)
