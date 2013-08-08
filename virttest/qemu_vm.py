@@ -1291,16 +1291,32 @@ class VM(virt_vm.BaseVM):
             """
             Created USB device to qemu USB emulation.
             Does not create device if exists
+            
+            @param device: path to file emulates USB device
+            @param device_size: size of file in human readable format k, M, G 
+            for kilo, mega and giga ...
             """
-            #ls returns 0 if device exists. Python has 0 as False, shell 0 if
-            #exists
+            #ls returns 0 if device exists. Python has 0 as False.
             exist_device = os.system("ls %s" % device)
             
-            if exist_device != 0:
+            #device exists, could it be from previous test with different size
+            if exist_device == 0:
+                actual_size = os.popen("du --apparent-size -h %s | cut -f1"
+                                               % device).read().rstrip()
+                logging.debug("Actual size '%s'" % actual_size)
+                #just need to cut off .0 part 
+                if '.' in actual_size:
+                    actual_size = "".join([
+                                       actual_size.split('.')[0],
+                                       actual_size[-1]
+                                       ])
+            else:
+                actual_size = None
             
+            if exist_device != 0 or actual_size != device_size:
                 logging.debug("Creating device %s" % device)
-                os.system('dd if=/dev/zero of=%s bs=%sM count=1' % (device, 
-                                            params.get("storage_size", 32)))
+                os.system('dd if=/dev/zero of=%s bs=%s count=1' % (device, 
+                                            params.get("storage_size", device_size)))
                 logging.debug("Creating filesystem ext3 on %s" % device)
                 os.system("mkfs.ext3 -F -L test -q %s " % device)
             
