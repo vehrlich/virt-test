@@ -19,7 +19,7 @@ with qemu-kvm monitor command
 
 import logging
 from virttest import utils_misc, utils_spice
-from autotest.client.shared import error
+from autotest.client.shared import utils, error
 
 
 def run_usb_redirection(test, params, env):
@@ -60,37 +60,92 @@ def run_usb_redirection(test, params, env):
             username="root", password="123456")
 
     #create file on guest
-    guest_session.cmd("dd if=/dev/random of=%s bs=%s count=1" %
-                      ("/tmp/test.file", "4M"))
-    md5sum_guest = guest_session.cmd("md5sum /tmp/test.file | cut -f1 -d\" \"")
+    guest_session.cmd("dd if=/dev/urandom of=%s%s bs=%s count=1" % (
+                      params["file_tmp_path"], 
+                       params["usb_file"],
+                       params["file_size"]
+                      ), timeout=120)
+    #get md5 hash
+    md5sum_guest = guest_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
+                                      params["file_tmp_path"], 
+                                      params["usb_file"]
+                                     ))
+
     logging.info("MD5SUM on guest: %s" % md5sum_guest)
     #USB was mounted by root when tested this test. This prevents right issue
-    guest_root_session.cmd("chmod 777 /media/test")
+    guest_root_session.cmd("chmod 777 %s" % params["file_path"])
     #copy file from guest to USB(USB is mounted automaticaly to /media )
-    guest_session.cmd("cp %s %s" % ("/tmp/test.file", "/media/test/test.file"))
-    md5sum_guest_usb = guest_session.cmd("md5sum /media/test/test.file | cut -f1 -d\" \"")
+    if params.get("migrate", "no") == "yes":
+        copy_background = utils.InterruptedThread(
+                            guest_session.cmd, ("cp %s%s %s%s" % (
+                            params["file_tmp_path"], 
+                            params["usb_file"],
+                            params["file_path"], 
+                            params["usb_file"]),), 
+                            kwargs={'timeout' : 300})
+        
+    
+        copy_background.start()
+        try:
+            while copy_background.isAlive():
+                guest_vm.migrate()
+        except Exception:
+            # If something bad happened in the main thread, ignore
+            # exceptions raised in the background thread
+            copy_background.join(suppress_exception=True)
+            raise
+        else:
+            copy_background.join()
+    else:
+        guest_session.cmd("cp %s%s %s%s &" % (
+                                              params["file_tmp_path"], 
+                                              params["usb_file"],
+                                              params["file_path"], 
+                                              params["usb_file"]
+                                              ), timeout=300)
+
+    md5sum_guest_usb = guest_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
+                                        params["file_path"], 
+                                        params["usb_file"]
+                                        ))
     logging.info("MD5SUM on guest USB: %s" % md5sum_guest_usb)
     #disconnect USB
-    guest_session.cmd("umount /media/test")
+    guest_root_session.cmd("umount %s" % params["file_path"], timeout=120)
     #USB hold by guest is freed after VM shutdown (maybe bug? Should not be closing
     #client enough?)
     guest_vm.destroy()
     client_session.cmd("pkill remote-viewer")
     utils_spice.wait_timeout(10)
     #check md5sum on client USB
-    md5sum_client_usb = client_session.cmd("md5sum /media/test/test.file | cut -f1 -d\" \"")
+    md5sum_client_usb = client_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
+                                      params["file_path"], 
+                                      params["usb_file"]
+                                     ))
+
     logging.info("MD5SUM on client USB: %s" % md5sum_client_usb)
     #copy file to client
-    client_session.cmd("cp %s %s" % ("/media/test/test.file", "/tmp/test.file"))
+    client_session.cmd("cp %s%s %s%s" % (
+                                          params["file_path"], 
+                                          params["usb_file"],
+                                          params["file_tmp_path"], 
+                                          params["usb_file"]
+                                          ))
     #check md5sum
-    md5sum_client = client_session.cmd("md5sum /tmp/test.file | cut -f1 -d\" \"")
+    md5sum_client = client_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
+                                      params["file_path"], 
+                                      params["usb_file"]
+                                     ))
     logging.info("MD5SUM on client: %s", md5sum_client)
 
     if md5sum_guest == md5sum_guest_usb == md5sum_client_usb ==  md5sum_client:
         logging.info("MD5SUM check PASS")
         return True
     else:
-        raise error.TestFail("MD5SUM check FAILED")
+        raise error.TestFail("MD5SUM check FAILED\n%s\n%s\n%s\n%s",
+                             md5sum_guest,
+                             md5sum_guest_usb,
+                             md5sum_client_usb,
+                             md5sum_client)
 
     client_session.close()
     guest_session.close()
