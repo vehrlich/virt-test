@@ -18,17 +18,30 @@ def launch_totem(guest_session, params):
     @param guest_vm - vm object
     """
 
-    totem_version = guest_session.cmd('totem --version')
+    totem_version = guest_session.cmd_output('totem --version')
     logging.info("Totem version", totem_version)
 
     #repeat parameters for totem
     logging.info("Set up video repeat to '%s' to the Totem.",
                   params.get("repeat_video"))
 
-    if params.get("repeat_video") == "yes":
-        cmd = "gconftool-2 --set /apps/totem/repeat -t bool true"
+    #release check. From RHEL7 dconf is used
+    #there is different of settings repeat
+    release = guest_session.cmd_output("cat /etc/release")
+    if "release 7.0" in release:
+        repeat_cmd = "dconf write /org/gnome/Totem/repeat true"
+        norepeat_cmd = "dconf write /org/gnome/Totem/repeat false"
+        #extra parameters
+        totem_params = ""
     else:
-        cmd = "gconftool-2 --set /apps/totem/repeat -t bool false"
+        repeat_cmd = "gconftool-2 --set /apps/totem/repeat -t bool true"
+        norepeat_cmd = "gconftool-2 --set /apps/totem/repeat -t bool false"
+        totem_params = "--display=:0.0 --play"
+
+    if params.get("repeat_video", "no") == "yes":
+        cmd = repeat_cmd
+    else:
+        cmd = norepeat_cmd
 
     guest_session.cmd(cmd)
 
@@ -36,13 +49,14 @@ def launch_totem(guest_session, params):
     guest_session.cmd(cmd)
 
     #fullscreen parameters for totem
-    if params.get("fullscreen"):
+    if params.get("fullscreen", "no") == "yes":
         fullscreen = " --fullscreen "
     else:
         fullscreen = ""
 
-    cmd = "nohup totem %s %s --display=:0.0 --play &> /dev/null &" \
-            % (fullscreen, params.get("destination_video_file_path"))
+    cmd = "nohup totem %s %s %s &> /dev/null &" \
+            % (fullscreen, params.get("destination_video_file_path"), 
+               totem_params)
     guest_session.cmd(cmd)
 
 def deploy_video_file(test, vm_obj, params):
