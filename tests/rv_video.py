@@ -27,7 +27,7 @@ def launch_totem(guest_session, params):
 
     #release check. From RHEL7 dconf is used
     #there is different of settings repeat
-    release = guest_session.cmd_output("cat /etc/release")
+    release = guest_session.cmd_output("cat /etc/redhat-release")
     if "release 7.0" in release:
         repeat_cmd = "dconf write /org/gnome/Totem/repeat true"
         norepeat_cmd = "dconf write /org/gnome/Totem/repeat false"
