@@ -17,6 +17,12 @@ class RVConnectError(Exception):
     pass
 
 def _is_pid_alive(session, pid):
+    """
+    verify the process is still alive
+
+    :param - established session
+    :pid - process that is to be checked
+    """
 
     try:
         session.cmd("ps -p %s" % pid)
@@ -123,14 +129,21 @@ def verify_established(client_vm, host, port, rv_binary,
     client_session.close()
 
 
-def start_vdagent(guest_session, test_timeout):
+def start_vdagent(guest_session, os_type, test_timeout):
     """
     Sending commands to start the spice-vdagentd service
 
     :param guest_session: ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
     """
-    cmd = "service spice-vdagentd start"
+    if os_type == "linux":
+        cmd = "service spice-vdagentd start"
+    elif os_type == "windows":
+        cmd = 'net start "RHEV Spice Agent"'
+    else:
+        raise error.TestFail("Error: os_type passed to stop_vdagent is invalid")
+
     try:
         guest_session.cmd(cmd, print_func=logging.info,
                           timeout=test_timeout)
@@ -138,73 +151,117 @@ def start_vdagent(guest_session, test_timeout):
         logging.debug("Status code of \"%s\" was not obtained, most likely"
                       "due to a problem with colored output" % cmd)
     except:
-        raise error.TestFail("Guest Vdagent Daemon Start failed")
+        logging.warn("Starting Vdagent May Not Have Started Properly")
+        #raise error.TestFail("Guest Vdagent Daemon Start failed")
 
     logging.debug("------------ End of guest checking for Spice Vdagent"
                   " Daemon ------------")
     wait_timeout(3)
 
 
-def restart_vdagent(guest_session, test_timeout):
+def restart_vdagent(guest_session, os_type, test_timeout):
     """
     Sending commands to restart the spice-vdagentd service
-
     :param guest_session: ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
+    
     """
-    cmd = "service spice-vdagentd restart"
-    try:
-        guest_session.cmd(cmd, print_func=logging.info,
-                          timeout=test_timeout)
-    except ShellCmdError:
-        raise error.TestFail("Couldn't restart spice vdagent process")
-    except:
-        raise error.TestFail("Guest Vdagent Daemon Check failed")
+    if os_type == "linux":
+        cmd = "service spice-vdagentd restart"
+        try:
+            guest_session.cmd(cmd, print_func=logging.info,
+                              timeout=test_timeout)
+        except ShellCmdError:
+            raise error.TestFail("Couldn't restart spice vdagent process")
+        except:
+            raise error.TestFail("Guest Vdagent Daemon Check failed")
 
-    logging.debug("------------ End of Spice Vdagent"
-                  " Daemon  Restart ------------")
+        logging.debug("------------ End of Spice Vdagent"
+                      " Daemon  Restart ------------")
+    elif os_type == "windows":
+        try:
+            guest_session.cmd('net stop "RHEV Spice Agent"',
+                              print_func=logging.info, timeout=test_timeout)
+            guest_session.cmd('net start "RHEV Spice Agent"',
+                              print_func=logging.info, timeout=test_timeout)
+        except ShellCmdError:
+            raise error.TestFail("Couldn't restart spice vdagent process")
+        except:
+            raise error.TestFail("Guest Vdagent Daemon Check failed")
+
+        logging.debug("------------ End of Spice Vdagent"
+                      " Daemon  Restart ------------")
+
     wait_timeout(3)
 
 
-def stop_vdagent(guest_session, test_timeout):
+def stop_vdagent(guest_session, os_type, test_timeout):
     """
     Sending commands to stop the spice-vdagentd service
 
     :param guest_session: ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
     """
-    cmd = "service spice-vdagentd stop"
+    if os_type == "linux":
+        cmd = "service spice-vdagentd stop"
+    elif os_type == "windows":
+        cmd = 'net stop "RHEV Spice Agent"'
+    else:
+        raise error.TestFail("Error: os_type passed to stop_vdagent is invalid")
+      
+
     try:
         guest_session.cmd(cmd, print_func=logging.info,
-                          timeout=test_timeout)
+                     timeout=test_timeout)
     except ShellStatusError:
         logging.debug("Status code of \"%s\" was not obtained, most likely"
                       "due to a problem with colored output" % cmd)
     except ShellCmdError:
         raise error.TestFail("Couldn't turn off spice vdagent process")
     except:
-        raise error.TestFail("Guest Vdagent Daemon Check failed")
+        logging.warn("Starting Vdagent May Not Have Stopped Properly")
+        #raise error.TestFail("Guest Vdagent Daemon Check failed")
 
     logging.debug("------------ End of guest checking for Spice Vdagent"
                   " Daemon ------------")
+
     wait_timeout(3)
 
 
-def verify_vdagent(guest_session, test_timeout):
+def verify_vdagent(guest_session, os_type, test_timeout):
     """
     Verifying vdagent is installed on a VM
 
     :param guest_session: ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
     """
-    cmd = "rpm -qa | grep spice-vdagent"
+    if os_type == "linux":
+        cmd = "rpm -qa | grep spice-vdagent"
 
-    try:
-        guest_session.cmd(cmd, print_func=logging.info, timeout=test_timeout)
-    finally:
-        logging.debug("----------- End of guest check to see if vdagent package"
-                      " is available ------------")
-    wait_timeout(3)
+        try:
+            guest_session.cmd(cmd, print_func=logging.info,
+                              timeout=test_timeout)
+        finally:
+            logging.debug("---- End of guest check to see if vdagent package"
+                          " is available ----")
+        wait_timeout(3)
+    elif os_type == "windows":
+        cmd = 'net start | FIND "Spice"'
+        try:
+            output = guest_session.cmd(cmd, print_func=logging.info,
+                                       timeout=test_timeout)
+            if "Spice" in output:
+                print "Guest vdagent is running"
+        finally:
+            logging.debug("-----End of guest check to see if vdagent is running"
+                          " ----")
+        wait_timeout(3)
+    else:
+        raise error.TestFail("os_type passed to verify_vdagent is invalid")
+
 
 
 def get_vdagent_status(vm_session, test_timeout):
@@ -231,29 +288,47 @@ def get_vdagent_status(vm_session, test_timeout):
     wait_timeout(3)
     return(output)
 
-def verify_virtio(guest_session, test_timeout):
+
+def verify_virtio(guest_session, os_type, test_timeout):
     """
     Verify Virtio linux driver is properly loaded.
 
     :param guest_session: ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
     """
-    #cmd = "lsmod | grep virtio_console"
-    cmd = "ls /dev/virtio-ports/"
-    try:
-        guest_session.cmd(cmd, print_func=logging.info, timeout=test_timeout)
-    finally:
-        logging.debug("------------ End of guest check of the Virtio-Serial"
-                      " Driver------------")
-    wait_timeout(3)
+    if os_type == "linux":
+        #cmd = "lsmod | grep virtio_console"
+        cmd = "ls /dev/virtio-ports/"
+        try:
+            guest_session.cmd(cmd, print_func=logging.info,
+                              timeout=test_timeout)
+        finally:
+            logging.debug("------------ End of guest check of the Virtio-Serial"
+                          " Driver------------")
+        wait_timeout(3)
+    elif os_type == "windows":
+        cmd = 'driverquery | FIND "VirtioSerial"'
+        try:
+            output = guest_session.cmd(cmd, print_func=logging.info,
+                                       timeout=test_timeout)
+            if "VirtioSerial" in output:
+                print "Virtio Serial driver is installed"
+        finally:
+            logging.debug("----------End of guest check of Virtio-Serial driver"
+                          " ------------")
+        wait_timeout(3)
+    else:
+        raise error.TestFail("os_type passed to verify_vdagent is invalid")
+   
 
 def install_rv_win(client, host_path, client_path='C:\\virt-viewer.msi'):
     """
     Install remote-viewer on a windows client
 
-    @param client:      VM object
-    @param host_path:   Location of installer on host
-    @param client_path: Location of installer after copying
+    :param client:      VM object
+    :param host_path:   Location of installer on host
+    :param client_path: Location of installer after copying
     """
     session = client.wait_for_login(
             timeout=int(client.params.get("login_timeout", 360)))
@@ -283,7 +358,10 @@ def clear_interface(vm, login_timeout = 360, timeout = 5):
     """
     Clears user interface of a vm without restart
 
-    @param vm:      VM where cleaning is required
+    :param vm:      VM where cleaning is required
+    :param login_timeout: timeout time for logging on
+    :param imeout: wait time after clearing the interface
+
     """
     if vm.params.get("os_type") == "windows":
         clear_interface_windows(vm, login_timeout, timeout)
@@ -368,10 +446,10 @@ def gen_rv_file(params, guest_vm, host_subj = None, cacert = None):
     """
     Generates vv file for remote-viewer
 
-    @param params:          all parameters of the test
-    @param guest_vm:        object of a guest VM
-    @param host_subj:    subject of the host
-    @param cacert:          location of certificate of host
+    :param params:          all parameters of the test
+    :param guest_vm:        object of a guest VM
+    :param host_subj:    subject of the host
+    :param cacert:          location of certificate of host
     """
     full_screen = params.get("full_screen")
     proxy = params.get("spice_proxy")

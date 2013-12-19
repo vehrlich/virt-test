@@ -117,8 +117,11 @@ def setup_vm_windows(vm, params, env):
         vioserial = params.get("vioserial")
         winp7 = params.get("winp7zip")
         guest_script_req = params.get("guest_script_req")
+        md5sumwin = params.get("md5sumwin")
+        md5sumwin_dir = os.path.join("scripts", md5sumwin)
         guest_sr_dir = os.path.join("scripts", guest_script_req)
         guest_sr_path = utils_misc.get_path(test.virtdir, guest_sr_dir)
+        md5sumwin_path = utils_misc.get_path(test.virtdir, md5sumwin_dir)
         winp7_path = os.path.join(test.virtdir, 'deps', winp7)
         winqxlzip = os.path.join(test.virtdir, 'deps', winqxl)
         winvdagentzip = os.path.join(test.virtdir, 'deps', winvdagent)
@@ -133,10 +136,12 @@ def setup_vm_windows(vm, params, env):
         vm.copy_files_to(winvdagentzip, "C:\\")
         vm.copy_files_to(vioserialzip, "C:\\")
         vm.copy_files_to(guest_sr_path, "C:\\")
-
+        vm.copy_files_to(md5sumwin_path, "C:\\")
+        
         #extract winvdagent zip and start service
         logging.info("Installing vdagent")
         session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wvdagent.zip -oC:\\')
+        utils_spice.wait_timeout(2)
         session.cmd_status("C:\\vdservice.exe install")
         #wait for vdservice to come up
         utils_spice.wait_timeout(5)

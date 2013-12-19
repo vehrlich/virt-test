@@ -1,8 +1,10 @@
 """
 rv_copyandpaste.py Tests copy&paste functionality between client and guest
                    using the spice vdagent daemon.
+                   Supports RHEL and Windows guests, tested w/Win7
 
 Requires: connected binaries remote-viewer, Xorg, gnome session
+Requires: rv_setup for windows guest tests
 
 """
 import logging, os, time
@@ -22,8 +24,8 @@ def wait_timeout(timeout=10):
 
 def clear_cb(session, params):
     """
-
     Use the clipboard script to copy an image into the clipboard.
+
     @param session: the ssh session where the clipboard is to be cleared
     @param params: Dictionary with the test parameters.
     """
@@ -200,7 +202,7 @@ def verify_img_paste_fails(session_to_copy_from, interpreter, script_call,
 
 def verify_text_copy(session_to_copy_from, interpreter, script_call,
                      script_params, string_length, final_text_path,
-                     test_timeout):
+                     os_type, test_timeout):
     """
     Verify copying a large amount of textual data to the clipboard and to
     a file is successful, and return the checksum of the file.
@@ -210,6 +212,7 @@ def verify_text_copy(session_to_copy_from, interpreter, script_call,
     @param script_call: script param
     @param script_params: script param
     @param final_text_path: location of where the text file is created
+    @param os_type: os of the session rhel or windows
     @param test_timeout: timeout time for the cmd
 
     @return file_checksum: checksum of the textfile that was created.
@@ -230,7 +233,10 @@ def verify_text_copy(session_to_copy_from, interpreter, script_call,
     logging.debug("------------ End of script output of the Copying"
                   " Session ------------")
     # Get the checksum of the file
-    cmd = "md5sum %s" % (final_text_path)
+    if os_type == "linux":
+        cmd = "md5sum %s" % (final_text_path)
+    else:
+        cmd = "C:\\fciv.exe %s" % (final_text_path)
     try:
         logging.debug("------------ Script output ------------")
         output = session_to_copy_from.cmd(cmd, print_func=logging.info,
@@ -242,22 +248,24 @@ def verify_text_copy(session_to_copy_from, interpreter, script_call,
                   " Session ------------")
     # Get the size of the copied image, this will be used for
     # verification on the other session that the paste was successful
-    file_checksum = output.split()[0]
+    #checksum is the 2nd to last value for both windows and RHEL
+    file_checksum = output.split()[-2]
     return file_checksum
 
 
 def verify_txt_paste_success(session_to_paste_to, interpreter,
-                             script_call, script_params,
-                             final_text_path, textfile_checksum, test_timeout):
+                             script_call, script_params, final_text_path,
+                             textfile_checksum, os_type, test_timeout):
     """
     Use the clipboard script to copy text into the clipboard.
 
-    @param session_to_copy_from: VM ssh session where text is to be copied
+    @param session_to_paste_to: VM ssh session where text is to be pasted
     @param interpreter: script param
     @param script_call: script param
     @param script_params: script param
-    @param final_image_path: location of where the image should be pasted
-    @param image_size: the size of the image to be verified
+    @param final_text_path: location of where the text should be pasted
+    @param textfile_checksum: the checksum to match the pasted text
+    @param os_type: os of the session rhel or windows
     @param test_timeout: timeout time for the cmd
     """
     cmd = "%s %s %s %s" % (interpreter, script_call,
@@ -274,7 +282,10 @@ def verify_txt_paste_success(session_to_paste_to, interpreter,
         logging.info("------------ End of script output of the Pasting"
                      " Session ------------")
     # Get the checksum of the file
-    cmd = "md5sum %s" % (final_text_path)
+    if os_type == "linux":
+        cmd = "md5sum %s" % (final_text_path)
+    else:
+        cmd = "C:\\fciv.exe %s" % (final_text_path)
     try:
         logging.debug("------------ Script output ------------")
         output = session_to_paste_to.cmd(cmd, print_func=logging.info,
@@ -284,7 +295,7 @@ def verify_txt_paste_success(session_to_paste_to, interpreter,
 
     logging.info("------------ End of script output of the Pasting"
                  " Session ------------")
-    file_checksum = output.split()[0]
+    file_checksum = output.split()[-2]
     if file_checksum == textfile_checksum:
         print "PASS: The large text file was successfully pasted"
     else:
@@ -305,7 +316,6 @@ def place_text_in_clipboard(session_to_copy_from, interpreter, script_call,
     """
     cmd = "%s %s %s %s" % (interpreter, script_call,
                            script_params, testing_text)
-
     try:
         logging.debug("------------ Script output ------------")
         output = session_to_copy_from.cmd(cmd, print_func=logging.info,
@@ -346,7 +356,6 @@ def verify_paste_fails(session_to_paste_to, testing_text, interpreter,
     @param session_to_paste_to: VM ssh session where text is to be copied
     @param interpreter: script param
     @param script_call: script param
-    @param script_params: script param
     @param testing_text: text to be pasted
     @param test_timeout: timeout time for the cmd
     """
@@ -377,7 +386,6 @@ def verify_paste_successful(session_to_paste_to, testing_text, interpreter,
     @param session_to_paste_to: VM ssh session where text is to be copied
     @param interpreter: script param
     @param script_call: script param
-    @param script_params: script param
     @param testing_text: text to be pasted
     @param test_timeout: timeout time for the cmd
     """
@@ -387,6 +395,7 @@ def verify_paste_successful(session_to_paste_to, testing_text, interpreter,
         output = session_to_paste_to.cmd(cmd, print_func=logging.info,
                                          timeout=test_timeout)
         if testing_text in output:
+            logging.info(output)
             logging.info("Pasting from the clipboard is successful")
         else:
             raise error.TestFail("Pasting from the clipboard failed, "
@@ -398,7 +407,7 @@ def verify_paste_successful(session_to_paste_to, testing_text, interpreter,
 
 
 def copy_and_paste_neg(session_to_copy_from, session_to_paste_to,
-                       guest_session, params):
+                       guest_session, params, dirparam):
     """
     Negative Test: Sending the commands to copy from one session to another,
     and make sure it does not work, because spice vdagent is off
@@ -407,34 +416,51 @@ def copy_and_paste_neg(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
     interpreter = params.get("interpreter")
-    script = params.get("guest_script")
+    #script = params.get("guest_script")
+    client_script = params.get("client_script")
+    guest_script = params.get("guest_script")
     script_params = params.get("script_params", "")
-    dst_path = params.get("dst_dir", "guest_script")
-    script_call = os.path.join(dst_path, script)
+    #dst_path = params.get("dst_dir", "guest_script")
+    dst_path_client = params.get("dst_dir_client", "client_script")
+    dst_path_guest = params.get("dst_dir_guest", "guest_script")
+    script_call_guest = dst_path_guest + guest_script
+    script_call_client = os.path.join(dst_path_client, client_script)
     testing_text = params.get("text_to_test")
+    guest_os = params.get("os_type")
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
 
     # Before doing the copy and paste, verify vdagent is installed and the
     # daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, guest_os, test_timeout)
     # Stop vdagent for this negative test
-    utils_spice.stop_vdagent(guest_session, test_timeout)
+    utils_spice.stop_vdagent(guest_session, guest_os, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, guest_os, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
-    place_text_in_clipboard(session_to_copy_from, interpreter, script_call,
-                            script_params, testing_text, test_timeout)
+    place_text_in_clipboard(session_to_copy_from, interpreter,
+               copyfrom_script_call, script_params, testing_text, test_timeout)
     # Now test to see if the copied text from the one session can
     # be pasted on the other
     verify_paste_fails(session_to_paste_to, testing_text, interpreter,
-                       script_call, test_timeout)
-
+                       pasteto_script_call, test_timeout)
+    #After the test is over, turn vdagent back on
+    utils_spice.start_vdagent(guest_session, guest_os, test_timeout)
 
 def copy_and_paste_pos(session_to_copy_from, session_to_paste_to,
-                       guest_session, params):
+                       guest_session, params, dirparam):
     """
     Sending the commands to copy from one session to another, and make
     sure it works correctly
@@ -443,6 +469,7 @@ def copy_and_paste_pos(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
@@ -452,32 +479,38 @@ def copy_and_paste_pos(session_to_copy_from, session_to_paste_to,
     script_params = params.get("script_params", "")
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
-    #VP, will the following work?, should check for windows guest
     script_call_guest = dst_path_guest + guest_script
     script_call_client = os.path.join(dst_path_client, client_script)
     testing_text = params.get("text_to_test")
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+    os_type = params.get("os_type")
+
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    output = guest_session.cmd('net start | FIND "Spice"')
-    if "Spice" in output:
-        print "Guest vdagent is running"
-    #VP2: Please uncomment below and fix
-    #utils_spice.verify_vdagent(guest_session, test_timeout)
+    #print "Guest OS: " + params.get("os_type")
+    #print "Client OS:" + params.get("os_type_vm2")
+    utils_spice.start_vdagent(guest_session, os_type, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    #VP2: Please uncomment below and fix
-    #utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
-    place_text_in_clipboard(session_to_copy_from, interpreter, script_call_client,
-                            script_params, testing_text, test_timeout)
+    place_text_in_clipboard(session_to_copy_from, interpreter,
+               copyfrom_script_call, script_params, testing_text, test_timeout)
     # Now test to see if the copied text from the one session can be
     # pasted on the other
     verify_paste_successful(session_to_paste_to, testing_text, interpreter,
-                            script_call_guest, test_timeout)
-
+                            pasteto_script_call, test_timeout)
 
 def restart_cppaste(session_to_copy_from, session_to_paste_to,
-                    guest_session, params):
+                    guest_session, params, dirparam):
     """
     Sending the commands to copy from one session to another, and make
     sure it works correctly after Restarting vdagent
@@ -486,48 +519,62 @@ def restart_cppaste(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
     interpreter = params.get("interpreter")
-    script = params.get("guest_script")
+    client_script = params.get("client_script")
+    guest_script = params.get("guest_script")
     script_params = params.get("script_params", "")
-    dst_path = params.get("dst_dir", "guest_script")
-    script_call = os.path.join(dst_path, script)
+    dst_path_client = params.get("dst_dir_client", "client_script")
+    dst_path_guest = params.get("dst_dir_guest", "guest_script")
+    script_call_guest = dst_path_guest + guest_script
+    script_call_client = os.path.join(dst_path_client, client_script)
     testing_text = params.get("text_to_test")
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+    os_type = params.get("os_type")
+
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
-    place_text_in_clipboard(session_to_copy_from, interpreter, script_call,
-                            script_params, testing_text, test_timeout)
+    place_text_in_clipboard(session_to_copy_from, interpreter,
+               copyfrom_script_call, script_params, testing_text, test_timeout)
     # Now test to see if the copied text from the one session can be
     # pasted on the other
     verify_paste_successful(session_to_paste_to, testing_text, interpreter,
-                            script_call, test_timeout)
+                            pasteto_script_call, test_timeout)
     # Restart vdagent, clear the clipboard, verify cp and paste still works
-    utils_spice.restart_vdagent(guest_session, test_timeout)
+    utils_spice.restart_vdagent(guest_session, os_type, test_timeout)
 
     clear_cb(session_to_paste_to, params)
     clear_cb(session_to_copy_from, params)
     wait_timeout(5)
 
     # Command to copy text and put it in the keyboard, copy on the client
-    place_text_in_clipboard(session_to_copy_from, interpreter, script_call,
-                            script_params, testing_text, test_timeout)
+    place_text_in_clipboard(session_to_copy_from, interpreter,
+               copyfrom_script_call, script_params, testing_text, test_timeout)
 
     wait_timeout(5)
     # Now test to see if the copied text from the one session can be
     # pasted on the other
     verify_paste_successful(session_to_paste_to, testing_text, interpreter,
-                            script_call, test_timeout)
+                            pasteto_script_call, test_timeout)
 
 
 def copy_and_paste_cpdisabled_neg(session_to_copy_from, session_to_paste_to,
-                                  guest_session, params):
+                                  guest_session, params, dirparam):
     """
     Negative Test: Sending the commands to copy from one session to another,
     for this test cp/paste will be disabled from qemu-kvm, Verify with vdagent
@@ -537,32 +584,46 @@ def copy_and_paste_cpdisabled_neg(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
     interpreter = params.get("interpreter")
-    script = params.get("guest_script")
+    client_script = params.get("client_script")
+    guest_script = params.get("guest_script")
     script_params = params.get("script_params", "")
-    dst_path = params.get("dst_dir", "guest_script")
-    script_call = os.path.join(dst_path, script)
+    dst_path_client = params.get("dst_dir_client", "client_script")
+    dst_path_guest = params.get("dst_dir_guest", "guest_script")
+    script_call_guest = dst_path_guest + guest_script
+    script_call_client = os.path.join(dst_path_client, client_script)
     testing_text = params.get("text_to_test")
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+    os_type = params.get("os_type")
+
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
 
     # Before doing the copy and paste, verify vdagent is installed and the
     # daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
-    place_text_in_clipboard(session_to_copy_from, interpreter, script_call,
-                            script_params, testing_text, test_timeout)
+    place_text_in_clipboard(session_to_copy_from, interpreter,
+               copyfrom_script_call, script_params, testing_text, test_timeout)
     # Now test to see if the copied text from the one session can be pasted
     # on the other session
     verify_paste_fails(session_to_paste_to, testing_text, interpreter,
-                       script_call, test_timeout)
+                       pasteto_script_call, test_timeout)
 
 
 def copy_and_paste_largetext(session_to_copy_from, session_to_paste_to,
-                             guest_session, params):
+                             guest_session, params, dirparam):
     """
     Sending the commands to copy large text from one session to another, and
     make sure the data is still correct.
@@ -571,39 +632,71 @@ def copy_and_paste_largetext(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
     interpreter = params.get("interpreter")
-    script = params.get("guest_script")
+    client_script = params.get("client_script")
+    guest_script = params.get("guest_script")
+    dst_path_client = params.get("dst_dir_client", "client_script")
+    dst_path_guest = params.get("dst_dir_guest", "guest_script")
+    script_call_guest = dst_path_guest + guest_script
+    script_call_client = os.path.join(dst_path_client, client_script)
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+    copyfrom_path = ""
+    copyto_path = ""
+    copyfrom_os = ""
+    copyto_os = ""
+    os_type = params.get("os_type")
+
+    #determine correct script call and paths
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+        copyfrom_path = os.path.join(params.get("dst_dir_client"),
+                                    params.get("final_textfile"))
+        copyto_path =  os.path.join(params.get("dst_dir_guest"),
+                                    params.get("final_textfile"))
+        copyfrom_os = params.get("os_type_vm2")
+        copyto_os = params.get("os_type")
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
+        copyfrom_path =  os.path.join(params.get("dst_dir_guest"),
+                                    params.get("final_textfile"))
+        copyto_path = os.path.join(params.get("dst_dir_client"),
+                                    params.get("final_textfile"))
+        copyfrom_os = params.get("os_type")
+        copyto_os = params.get("os_type_vm2")
+
+
     script_write_params = params.get("script_params_writef")
     script_create_params = params.get("script_params_createf")
-    dst_path = params.get("dst_dir", "guest_script")
-    final_text_path = os.path.join(params.get("dst_dir"),
-                                    params.get("final_textfile"))
-    script_call = os.path.join(dst_path, script)
     string_length = params.get("text_to_test")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
 
     # Command to copy text and put it in the clipboard
     textfile_checksum = verify_text_copy(session_to_copy_from, interpreter,
-                                  script_call, script_create_params,
-                                  string_length, final_text_path, test_timeout)
+                        copyfrom_script_call, script_create_params,
+                        string_length, copyfrom_path, copyfrom_os, test_timeout)
     wait_timeout(30)
 
     # Verify the paste on the session to paste to
     verify_txt_paste_success(session_to_paste_to, interpreter,
-                             script_call, script_write_params,
-                             final_text_path, textfile_checksum, test_timeout)
+                             pasteto_script_call, script_write_params,
+                             copyto_path, textfile_checksum, copyto_os,
+                             test_timeout)
 
 
 def restart_cppaste_lrgtext(session_to_copy_from, session_to_paste_to,
-                    guest_session, params):
+                    guest_session, params, dirparam):
     """
     Sending the commands to copy large text from one session to another, and
     make sure the data is still correct after restarting vdagent.
@@ -612,51 +705,83 @@ def restart_cppaste_lrgtext(session_to_copy_from, session_to_paste_to,
     @param session_to_paste_to: ssh session of the vm to paste to
     @param guest_session: guest ssh session
     @param params: Dictionary with the test parameters.
+    @param dirparam: parameter, which indicates the direction of the copy-paste (C->G or G->C)
     """
     # Get necessary params
     test_timeout = float(params.get("test_timeout", 600))
     interpreter = params.get("interpreter")
-    script = params.get("guest_script")
+    client_script = params.get("client_script")
+    guest_script = params.get("guest_script")
+    dst_path_client = params.get("dst_dir_client", "client_script")
+    dst_path_guest = params.get("dst_dir_guest", "guest_script")
+    script_call_guest = dst_path_guest + guest_script
+    script_call_client = os.path.join(dst_path_client, client_script)
+    copyfrom_script_call = ""
+    pasteto_script_call = ""
+    copyfrom_path = ""
+    copyto_path = ""
+    copyfrom_os = ""
+    copyto_os = ""
+    os_type = params.get("os_type")
+
+    if(dirparam == "client_to_guest"):
+        copyfrom_script_call = script_call_client
+        pasteto_script_call = script_call_guest
+        copyfrom_path = os.path.join(params.get("dst_dir_client"),
+                                    params.get("final_textfile"))
+        copyto_path =  os.path.join(params.get("dst_dir_guest"),
+                                    params.get("final_textfile"))
+        copyfrom_os = params.get("os_type_vm2")
+        copyto_os = params.get("os_type")
+    elif(dirparam == "guest_to_client"):
+        copyfrom_script_call = script_call_guest
+        pasteto_script_call = script_call_client
+        copyfrom_path =  os.path.join(params.get("dst_dir_guest"),
+                                    params.get("final_textfile"))
+        copyto_path = os.path.join(params.get("dst_dir_client"),
+                                    params.get("final_textfile"))
+        copyfrom_os = params.get("os_type")
+        copyto_os = params.get("os_type_vm2")
+
+
     script_write_params = params.get("script_params_writef")
     script_create_params = params.get("script_params_createf")
-    dst_path = params.get("dst_dir", "guest_script")
-    final_text_path = os.path.join(params.get("dst_dir"),
-                                    params.get("final_textfile"))
-    script_call = os.path.join(dst_path, script)
     string_length = params.get("text_to_test")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
 
     # Command to copy text and put it in the clipboard
     textfile_checksum = verify_text_copy(session_to_copy_from, interpreter,
-                                  script_call, script_create_params,
-                                  string_length, final_text_path, test_timeout)
+                        copyfrom_script_call, script_create_params,
+                        string_length, copyfrom_path, copyfrom_os, test_timeout)
     wait_timeout(30)
 
     # Verify the paste on the session to paste to
     verify_txt_paste_success(session_to_paste_to, interpreter,
-                             script_call, script_write_params,
-                             final_text_path, textfile_checksum, test_timeout)
+                             pasteto_script_call, script_write_params,
+                             copyto_path, textfile_checksum, copyto_os,
+                             test_timeout)
     # Restart vdagent & clear the clipboards.
-    utils_spice.restart_vdagent(guest_session, test_timeout)
+    utils_spice.restart_vdagent(guest_session, os_type, test_timeout)
     clear_cb(session_to_paste_to, params)
     clear_cb(session_to_copy_from, params)
     wait_timeout(5)
 
     # Command to copy text and put it in the clipboard
     textfile_checksum = verify_text_copy(session_to_copy_from, interpreter,
-                                  script_call, script_create_params,
-                                  string_length, final_text_path, test_timeout)
+                        copyfrom_script_call, script_create_params,
+                        string_length, copyfrom_path, copyfrom_os, test_timeout)
     wait_timeout(30)
 
     # Verify the paste on the session to paste to
     verify_txt_paste_success(session_to_paste_to, interpreter,
-                             script_call, script_write_params,
-                             final_text_path, textfile_checksum, test_timeout)
+                             pasteto_script_call, script_write_params,
+                             copyto_path, textfile_checksum, copyto_os,
+                             test_timeout)
 
 
 def copy_and_paste_image_pos(session_to_copy_from, session_to_paste_to,
@@ -686,12 +811,13 @@ def copy_and_paste_image_pos(session_to_copy_from, session_to_paste_to,
     final_image_path_bmp = os.path.join(params.get("dst_dir"),
                                     params.get("final_image_bmp"))
     script_call = os.path.join(dst_path, script)
+    os_type = params.get("os_type")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
 
     if "png" in image_type:
         # Command to copy text and put it in the keyboard, copy on the client
@@ -711,7 +837,7 @@ def copy_and_paste_image_pos(session_to_copy_from, session_to_paste_to,
     else:
         # Testing bmp
         place_img_in_clipboard(session_to_copy_from, interpreter, script_call,
-                               script_set_params, dst_image_path_bmp, test_timeout)
+                           script_set_params, dst_image_path_bmp, test_timeout)
 
         # Now test to see if the copied text from the one session can be
         # pasted on the other
@@ -721,9 +847,9 @@ def copy_and_paste_image_pos(session_to_copy_from, session_to_paste_to,
         wait_timeout(30)
 
         # Verify the paste on the session to paste to
-        verify_img_paste_success(session_to_paste_to, interpreter,
-                                 script_call, script_save_params,
-                                 final_image_path_bmp, image_size, test_timeout)
+        verify_img_paste_success(session_to_paste_to, interpreter, script_call,
+                                 script_save_params, final_image_path_bmp,
+                                 image_size, test_timeout)
 
 
 def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
@@ -753,12 +879,13 @@ def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
     final_image_path_bmp = os.path.join(params.get("dst_dir"),
                                     params.get("final_image_bmp"))
     script_call = os.path.join(dst_path, script)
+    os_type = params.get("os_type")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
 
     if "png" in image_type:
         # Command to copy text and put it in the keyboard, copy on the client
@@ -778,7 +905,7 @@ def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
     else:
         # Testing bmp
         place_img_in_clipboard(session_to_copy_from, interpreter, script_call,
-                               script_set_params, dst_image_path_bmp, test_timeout)
+                            script_set_params, dst_image_path_bmp, test_timeout)
 
         # Now test to see if the copied text from the one session can be
         # pasted on the other
@@ -788,11 +915,11 @@ def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
         wait_timeout(30)
 
         # Verify the paste on the session to paste to
-        verify_img_paste_success(session_to_paste_to, interpreter,
-                                 script_call, script_save_params,
-                                 final_image_path_bmp, image_size, test_timeout)
+        verify_img_paste_success(session_to_paste_to, interpreter, script_call,
+                                 script_save_params, final_image_path_bmp,
+                                 image_size, test_timeout)
     # Restart vdagent & clear the clipboards.
-    utils_spice.restart_vdagent(guest_session, test_timeout)
+    utils_spice.restart_vdagent(guest_session, os_type, test_timeout)
     clear_cb(session_to_paste_to, params)
     clear_cb(session_to_copy_from, params)
     wait_timeout(5)
@@ -815,7 +942,7 @@ def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
     else:
         # Testing bmp
         place_img_in_clipboard(session_to_copy_from, interpreter, script_call,
-                               script_set_params, dst_image_path_bmp, test_timeout)
+                            script_set_params, dst_image_path_bmp, test_timeout)
 
         # Now test to see if the copied text from the one session can be
         # pasted on the other
@@ -825,9 +952,9 @@ def restart_cppaste_image(session_to_copy_from, session_to_paste_to,
         wait_timeout(30)
 
         # Verify the paste on the session to paste to
-        verify_img_paste_success(session_to_paste_to, interpreter,
-                                 script_call, script_save_params,
-                                 final_image_path_bmp, image_size, test_timeout)
+        verify_img_paste_success(session_to_paste_to, interpreter, script_call,
+                                 script_save_params, final_image_path_bmp,
+                                 image_size, test_timeout)
 
 
 def copy_and_paste_image_neg(session_to_copy_from, session_to_paste_to,
@@ -854,14 +981,15 @@ def copy_and_paste_image_neg(session_to_copy_from, session_to_paste_to,
     final_image_path = os.path.join(params.get("dst_dir"),
                                     params.get("final_image"))
     script_call = os.path.join(dst_path, script)
+    os_type = params.get("os_type")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Stop vdagent for this negative test
-    utils_spice.stop_vdagent(guest_session, test_timeout)
+    utils_spice.stop_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
     place_img_in_clipboard(session_to_copy_from, interpreter, script_call,
                             script_set_params, dst_image_path, test_timeout)
@@ -900,12 +1028,13 @@ def copyandpasteimg_cpdisabled_neg(session_to_copy_from, session_to_paste_to,
     final_image_path = os.path.join(params.get("dst_dir"),
                                     params.get("final_image"))
     script_call = os.path.join(dst_path, script)
+    os_type = params.get("os_type")
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
-    utils_spice.verify_vdagent(guest_session, test_timeout)
+    utils_spice.verify_vdagent(guest_session, os_type, test_timeout)
     # Make sure virtio driver is running
-    utils_spice.verify_virtio(guest_session, test_timeout)
+    utils_spice.verify_virtio(guest_session, os_type, test_timeout)
     # Command to copy text and put it in the keyboard, copy on the client
     place_img_in_clipboard(session_to_copy_from, interpreter, script_call,
                             script_set_params, dst_image_path, test_timeout)
@@ -959,13 +1088,10 @@ def run_rv_copyandpaste(test, params, env):
     guest_root_session = guest_vm.wait_for_login(
             timeout=int(params.get("login_timeout", 360)),
             username="root", password="123456")
-   
+
     #get the type of OS for client and guest
     guest_vmparams = guest_vm.get_params()
     guest_ostype = guest_vmparams.get("os_type")
-
-    client_vmparams = client_vm.get_params()
-    client_ostype = client_vmparams.get("os_type")
 
     logging.info("Get PID of remote-viewer")
     client_session.cmd("pgrep remote-viewer")
@@ -1028,7 +1154,7 @@ def run_rv_copyandpaste(test, params, env):
         try:
             guest_session.cmd("ps aux | grep -v grep | grep gnome-session")
         except aexpect.ShellCmdError:
-            raise error.TestWarn("gnome-session was probably not correctly started")
+            raise error.TestWarn("gnome-session probably not correctly started")
 
         guest_session.cmd("export DISPLAY=:0.0")
 
@@ -1052,7 +1178,7 @@ def run_rv_copyandpaste(test, params, env):
                 logging.info("Negative Test Case: Copy/Paste Disabled, Copying"
                              " from the Client to Guest Should Not Work\n")
                 copy_and_paste_cpdisabled_neg(client_session, guest_session,
-                                          guest_root_session, params)
+                                  guest_root_session, params, "client_to_guest")
         if "guest_to_client" in test_type:
             if "image" in test_type:
                 logging.info("Negative Test Case: Copy/Paste Disabled, Copying"
@@ -1063,7 +1189,7 @@ def run_rv_copyandpaste(test, params, env):
                 logging.info("Negative Test Case: Copy/Paste Disabled, Copying"
                              " from the Guest to Client Should Not Work\n")
                 copy_and_paste_cpdisabled_neg(guest_session, client_session,
-                                              guest_root_session, params)
+                                guest_root_session, params, "guest_to_client")
 
     elif "positive" in test_type:
         # These are positive tests, where the clipboards are synced because
@@ -1083,21 +1209,21 @@ def run_rv_copyandpaste(test, params, env):
                     logging.info("Restart Vdagent, Copying a String of size "
                                  + testing_text + " from the Client to Guest")
                     restart_cppaste_lrgtext(client_session, guest_session,
-                                            guest_root_session, params)
+                                 guest_root_session, params, "client_to_guest")
                 else:
                     logging.info("Copying a String of size " + testing_text +
                              " from the Client to Guest")
                     copy_and_paste_largetext(client_session, guest_session,
-                               guest_root_session, params)
+                               guest_root_session, params, "client_to_guest")
             else:
                 if "restart" in test_type:
-                    logging.info("Restart Vdagent, Copying from Client to Guest\n")
+                    logging.info("Restart Vdagent, Copying Client to Guest")
                     restart_cppaste(client_session, guest_session,
-                                    guest_root_session, params)
+                                guest_root_session, params, "client_to_guest")
                 else:
                     logging.info("Copying from the Client to Guest\n")
                     copy_and_paste_pos(client_session, guest_session,
-                                       guest_root_session, params)
+                                 guest_root_session, params, "client_to_guest")
         if "guest_to_client" in test_type:
             if "image" in test_type:
                 if "restart" in test_type:
@@ -1113,21 +1239,21 @@ def run_rv_copyandpaste(test, params, env):
                     logging.info("Restart Vdagent, Copying a String of size "
                                  + testing_text + " from the Guest to Client")
                     restart_cppaste_lrgtext(guest_session, client_session,
-                                            guest_root_session, params)
+                                  guest_root_session, params, "guest_to_client")
                 else:
                     logging.info("Copying a String of size " + testing_text +
                                  " from the Guest to Client")
                     copy_and_paste_largetext(guest_session, client_session,
-                               guest_root_session, params)
+                               guest_root_session, params, "guest_to_client")
             else:
                 if "restart" in test_type:
                     logging.info("Restart Vdagent, Copying: Client to Guest\n")
                     restart_cppaste(guest_session, client_session,
-                                    guest_root_session, params)
+                                  guest_root_session, params, "guest_to_client")
                 else:
                     logging.info("Copying from the Guest to Client\n")
                     copy_and_paste_pos(guest_session, client_session,
-                                       guest_root_session, params)
+                                  guest_root_session, params, "guest_to_client")
     elif "negative" in test_type:
         # These are negative tests, where the clipboards are not synced because
         # the spice-vdagent service will not be running on the guest.
@@ -1141,7 +1267,7 @@ def run_rv_copyandpaste(test, params, env):
                 logging.info("Negative Test Case: Copying from the Client to"
                             "Guest Should Not Work\n")
                 copy_and_paste_neg(client_session, guest_session,
-                                   guest_root_session, params)
+                                 guest_root_session, params, "client_to_guest")
         if "guest_to_client" in test_type:
             if "image" in test_type:
                 logging.info("Negative Test Case: Copying an Image from the "
@@ -1152,7 +1278,7 @@ def run_rv_copyandpaste(test, params, env):
                 logging.info("Negative Test Case: Copying from the Guest to"
                              " Client Should Not Work\n")
                 copy_and_paste_neg(guest_session, client_session,
-                               guest_root_session, params)
+                               guest_root_session, params, "guest_to_client")
     else:
         # The test is not supported, verify what is a supported test.
         raise error.TestFail("Couldn't Find the Correct Test To Run")
