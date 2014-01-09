@@ -20,8 +20,8 @@ def _is_pid_alive(session, pid):
     """
     verify the process is still alive
 
-    :param - established session
-    :pid - process that is to be checked
+    :param session:- established session
+    :param pid: - process that is to be checked
     """
 
     try:
@@ -42,7 +42,7 @@ def wait_timeout(timeout=10):
     """
     time.sleep(timeout) + logging.debug(timeout)
 
-    :param timeout=10
+    :param timeout: default timeout = 10
     """
     logging.debug("Waiting (timeout=%ss)", timeout)
     time.sleep(timeout)
@@ -78,17 +78,19 @@ def kill_app(vm_name, app_name, params, env):
     vm_session.close()
 
 
-def verify_established(client_vm, host, port, rv_binary, 
+def verify_established(client_vm, host, port, rv_binary,
                        tls_port = None, secure_channels = None):
     """
     Parses netstat output for established connection on host:port
-    :param client_session - vm.wait_for_login()
-    :param host - host ip addr
-    :param port - port for client to connect
-    :param rv_binary - remote-viewer binary
+    :param client_vm: vm.wait_for_login()
+    :param host: host ip addr
+    :param port: port for client to connect
+    :param rv_binary:  remote-viewer binary
+    :param tls_port: value of the secure port if doing an secure connection
+    :param secure_channels: channels to secure if having a secure connection
     """
     rv_binary = rv_binary.split(os.path.sep)[-1]
-    print "Verification in progress" 
+    print "Verification in progress"
 
     client_session = client_vm.wait_for_login(timeout=60)
     tls_count = 0
@@ -96,18 +98,18 @@ def verify_established(client_vm, host, port, rv_binary,
     # !!! -n means do not resolve port names
     if ".exe" in rv_binary:
         cmd = "netstat -n"
-    
-    else:    
+
+    else:
         cmd = '(netstat -pn 2>&1| grep "^tcp.*:.*%s.*ESTABLISHED.*%s.*")' % \
             (host, rv_binary)
-    netstat_out = client_session.cmd_output(cmd)    
+    netstat_out = client_session.cmd_output(cmd)
     logging.info("netstat output: %s", netstat_out)
 
     if tls_port:
         tls_count = netstat_out.count(tls_port)
     else:
         tls_port = port
-    
+
     if (netstat_out.count(port)+tls_count) < 4:
         logging.error("Not enough channels were open")
         raise RVConnectError()
@@ -165,7 +167,7 @@ def restart_vdagent(guest_session, os_type, test_timeout):
     :param guest_session: ssh session of the VM
     :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmds
-    
+
     """
     if os_type == "linux":
         cmd = "service spice-vdagentd restart"
@@ -181,8 +183,12 @@ def restart_vdagent(guest_session, os_type, test_timeout):
                       " Daemon  Restart ------------")
     elif os_type == "windows":
         try:
-            guest_session.cmd('net stop "RHEV Spice Agent"',
-                              print_func=logging.info, timeout=test_timeout)
+            try:
+                guest_session.cmd('net stop "RHEV Spice Agent"',
+                                  print_func=logging.info, timeout=test_timeout)
+            except:
+                logging.debug("Failed to stop the service, may have been because" +
+                              " it was not running")
             guest_session.cmd('net start "RHEV Spice Agent"',
                               print_func=logging.info, timeout=test_timeout)
         except ShellCmdError:
@@ -210,7 +216,7 @@ def stop_vdagent(guest_session, os_type, test_timeout):
         cmd = 'net stop "RHEV Spice Agent"'
     else:
         raise error.TestFail("Error: os_type passed to stop_vdagent is invalid")
-      
+
 
     try:
         guest_session.cmd(cmd, print_func=logging.info,
@@ -264,29 +270,46 @@ def verify_vdagent(guest_session, os_type, test_timeout):
 
 
 
-def get_vdagent_status(vm_session, test_timeout):
+def get_vdagent_status(vm_session, os_type, test_timeout):
     """
     Return the status of vdagent
     :param vm_session:  ssh session of the VM
+    :param os_type: os the command is to be run on (windows or linux)
     :param test_timeout: timeout time for the cmd
     """
     output = ""
-    cmd = "service spice-vdagentd status"
 
-    wait_timeout(3)
-    try:
-        output = vm_session.cmd(
-            cmd, print_func=logging.info, timeout=test_timeout)
-    except ShellCmdError:
-        # getting the status of vdagent stopped returns 3, which results in a
-        # ShellCmdError
-        return("stopped")
-    except:
-        print "Unexpected error:", sys.exc_info()[0]
-        raise error.TestFail(
-            "Failed attempting to get status of spice-vdagentd")
-    wait_timeout(3)
-    return(output)
+    if os_type == "linux":
+        cmd = "service spice-vdagentd status"
+
+        wait_timeout(3)
+        try:
+            output = vm_session.cmd(
+                cmd, print_func=logging.info, timeout=test_timeout)
+        except ShellCmdError:
+            # getting the status of vdagent stopped returns 3, which results in a
+            # ShellCmdError
+            return("stopped")
+        except:
+            print "Unexpected error:", sys.exc_info()[0]
+            raise error.TestFail(
+               "Failed attempting to get status of spice-vdagentd")
+        wait_timeout(3)
+        return(output)
+    elif os_type == "windows":
+        cmd = 'net start | FIND "Spice"'
+        try:
+            output = vm_session.cmd(
+                cmd, print_func=logging.info, timeout=test_timeout)
+        except ShellCmdError:
+            return("stopped")
+        except:
+            print "Unexpected error:", sys.exc_info()[0]
+            raise error.TestFail(
+               "Failed attempting to get status of spice-vdagentd")
+        wait_timeout(3)
+        return("running")
+
 
 
 def verify_virtio(guest_session, os_type, test_timeout):
@@ -308,11 +331,11 @@ def verify_virtio(guest_session, os_type, test_timeout):
                           " Driver------------")
         wait_timeout(3)
     elif os_type == "windows":
-        cmd = 'driverquery | FIND "VirtioSerial"'
+        cmd = 'C:\\Windows\\winsxs\\amd64_microsoft-windows-pnputil_31bf3856ad364e35_6.1.7600.16385_none_5958b438d6388d15\\PnPutil.exe /e'
         try:
             output = guest_session.cmd(cmd, print_func=logging.info,
                                        timeout=test_timeout)
-            if "VirtioSerial" in output:
+            if "System devices" in output:
                 print "Virtio Serial driver is installed"
         finally:
             logging.debug("----------End of guest check of Virtio-Serial driver"
@@ -320,7 +343,7 @@ def verify_virtio(guest_session, os_type, test_timeout):
         wait_timeout(3)
     else:
         raise error.TestFail("os_type passed to verify_vdagent is invalid")
-   
+
 
 def install_rv_win(client, host_path, client_path='C:\\virt-viewer.msi'):
     """
@@ -360,7 +383,7 @@ def clear_interface(vm, login_timeout = 360, timeout = 5):
 
     :param vm:      VM where cleaning is required
     :param login_timeout: timeout time for logging on
-    :param imeout: wait time after clearing the interface
+    :param timeout: wait time after clearing the interface
 
     """
     if vm.params.get("os_type") == "windows":
@@ -412,8 +435,8 @@ def deploy_epel_repo(guest_session, params):
     """
     Deploy epel repository to RHEL VM If It's RHEL6 or 5.
 
-    :param guest_session - ssh session to guest VM
-    :param params
+    :param guest_session: - ssh session to guest VM
+    :param params: env params
     """
 
     # Check existence of epel repository
