@@ -48,6 +48,7 @@ def run_rv_logging(test, params, env):
                  "destination directory: %s, source script location: %s",
                  dst_path, script_path)
     guest_vm.copy_files_to(script_path, dst_path, timeout=60)
+    guest_os = params.get("os_type")
 
     # Some logging tests need the full desktop environment
     guest_session.cmd("export DISPLAY=:0.0")
@@ -59,27 +60,27 @@ def run_rv_logging(test, params, env):
     # Logging test for spice-vdagent
     elif(log_test == 'spice-vdagent'):
         logging.info("Running the logging test for spice-vdagent daemon")
-        utils_spice.start_vdagent(guest_root_session, test_timeout=15)
+        utils_spice.start_vdagent(guest_root_session, guest_os, test_timeout=15)
 
         # Testing the log after stopping spice-vdagentd
-        utils_spice.stop_vdagent(guest_root_session, test_timeout=15)
+        utils_spice.stop_vdagent(guest_root_session, guest_os, test_timeout=15)
         output = guest_root_session.cmd("tail -n 3 " + spicevdagent_logfile +
                                         " | grep 'vdagentd quiting'")
 
         # Testing the log after starting spice-vdagentd
-        utils_spice.start_vdagent(guest_root_session, test_timeout=15)
+        utils_spice.start_vdagent(guest_root_session, guest_os, test_timeout=15)
         output = guest_root_session.cmd("tail -n 2 " + spicevdagent_logfile +
                                         " | grep 'opening vdagent virtio channel'")
 
         # Testing the log after restart spice-vdagentd
-        utils_spice.restart_vdagent(guest_root_session, test_timeout=10)
+        utils_spice.restart_vdagent(guest_root_session, guest_os, test_timeout=10)
         output = guest_root_session.cmd("tail -n 2 " + spicevdagent_logfile +
                                         " | grep 'opening vdagent virtio channel'")
 
         cmd = ("echo \"SPICE_VDAGENTD_EXTRA_ARGS=-dd\">"
                "/etc/sysconfig/spice-vdagentd")
         guest_root_session.cmd(cmd)
-        utils_spice.restart_vdagent(guest_root_session, test_timeout=10)
+        utils_spice.restart_vdagent(guest_root_session, guest_os, test_timeout=10)
 
         # Finally test copying text within the guest
         cmd = "%s %s %s %s" % (interpreter, script_call,
