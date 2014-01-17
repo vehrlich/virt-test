@@ -379,14 +379,14 @@ DWORD WINAPI SocketToChild(LPVOID client_info_ptr)
 
     // Attempt to terminate the child's process tree:
     // Using taskkill (where available)
-    sprintf(buffer, "taskkill /PID %d /T /F", ci->pid);
+    //sprintf(buffer, "taskkill /PID %d /F", ci->pid);
     system(buffer);
     // .. and using TerminateJobObject()
-    TerminateJobObject(ci->hJob, 0);
+    //TerminateJobObject(ci->hJob, 0);
     // Wait for the ChildToSocket thread to terminate
-    WaitForSingleObject(ci->hThreadChildToSocket, 10000);
+    //WaitForSingleObject(ci->hThreadChildToSocket, 10000);
     // In case the thread refuses to exit, terminate it
-    TerminateThread(ci->hThreadChildToSocket, 0);
+    //TerminateThread(ci->hThreadChildToSocket, 0);
     // Close the socket
     closesocket(ci->socket);
 
