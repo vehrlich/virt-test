@@ -12,6 +12,7 @@ Requires: the client and guest VMs to be setup.
 
 import logging, os
 from os import system, getcwd, chdir
+from virttest import utils_spice
 
 def install_rpm(session, name, rpm):
     """
@@ -51,16 +52,15 @@ Moves the dogtail tests to a vm
     session.cmd("cp %s/%%gconf.xml ~/.gconf/desktop/gnome/interface/" \
                 % params.get("test_script_tgt"))
 
-
-def setup_vm(vm, params):
+def setup_vm_linux(vm, params):
     """
 Setup the vm for GUI testing, install dogtail & move tests over.
 
 @param vm: a VM
 @param params: dictionary of test paramaters
 """
-    session = vm.wait_for_login(username = "root", password = "123456",
-            timeout=int(params.get("login_timeout", 360)))
+
+    session = vm.wait_for_login(timeout=int(params.get("login_timeout", 360)))
     arch = params.get("vm_arch_name")
     fedoraurl = params.get("fedoraurl")
     wmctrl_64rpm = params.get("wmctrl_64rpm")
@@ -70,11 +70,29 @@ Setup the vm for GUI testing, install dogtail & move tests over.
         wmctrlrpm = os.path.join(fedoraurl, arch, wmctrl_64rpm)
     else:
         wmctrlrpm = os.path.join(fedoraurl, arch, wmctrl_32rpm)
-    if session.cmd_status("rpm -q dogtail"):
-        install_rpm(session, "dogtail", dogtailrpm)
-    if session.cmd_status("rpm -q wmctrl"):
-        install_rpm(session, "wmctrl", wmctrlrpm)
-    deploy_tests(vm, params)
+    if params.get("display", None) == "vnc":
+        logging.info("Display of VM is VNC; assuming it is client")    
+        if session.cmd_status("rpm -q dogtail"):
+            install_rpm(session, "dogtail", dogtailrpm)
+        if session.cmd_status("rpm -q wmctrl"):
+            install_rpm(session, "wmctrl", wmctrlrpm)
+        deploy_tests(vm, params)
+
+def setup_vm_windows(vm, params):
+    print params
+    return
+    if params.get("display", None) == "vnc":
+        logging.info("Display of VM is VNC; assuming it is client")
+        utils_spice.install_rv_win(vm, params.get("rv_installer"))
+        utils_spice.install_usbclerk_win(vm, params.get("usb_installer"))
+
+
+def setup_vm(vm, params):
+    if params.get("os_type") == "linux":
+        setup_vm_linux(vm, params)
+    elif params.get("os_type") == "windows":
+        setup_vm_windows(vm,params)
+  #      utils_spice.wait_timeout(20)
 
 def run_rv_setup(test, params, env):
     """
@@ -87,4 +105,4 @@ Setup the VMs for remote-viewer testing
 
     for vm in params.get("vms").split():
         logging.info("Setting up VM: " + vm)
-        setup_vm(env.get_vm(vm), params)
+        setup_vm(env.get_vm(vm), env.get_vm(vm).params)
