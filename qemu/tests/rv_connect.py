@@ -72,7 +72,7 @@ def launch_rv(client_vm, guest_vm, params):
     full_screen = params.get("full_screen")
 
     check_spice_info = params.get("spice_info")
-    ssltype = params.get("ssltype")
+    ssltype = params.get("ssltype", "")
     test_type = params.get("test_type")
 
     # cmd var keeps final remote-viewer command line
@@ -95,11 +95,12 @@ def launch_rv(client_vm, guest_vm, params):
     certdb = params.get("certdb")
     smartcard = params.get("smartcard")
     host_subj = None
-    cacert = None
+    cacert_host = None
+    cacert_client = None
 
     rv_parameters_from = params.get("rv_parameters_from", "cmd")
     if rv_parameters_from == 'file':
-        cmd += " ~/rv_file.vv"
+        cmd += " " + params.get("rv_file")
 
     client_session = client_vm.wait_for_login(
            timeout=int(params.get("login_timeout", 360)))
@@ -111,16 +112,16 @@ def launch_rv(client_vm, guest_vm, params):
         if guest_vm.get_spice_var("spice_ssl") == "yes":
 
             #client needs cacert file
-            cacert = "%s/%s" % (guest_vm.get_spice_var("spice_x509_prefix"),
-                               guest_vm.get_spice_var("spice_x509_cacert_file"))
-            client_session.cmd("rm -rf %s && mkdir -p %s" % (
-                               guest_vm.get_spice_var("spice_x509_prefix"),
-                               guest_vm.get_spice_var("spice_x509_prefix")))
-            remote.copy_files_to(client_vm.get_address(), 'scp',
-                                      params.get("username"),
-                                      params.get("password"),
-                                      params.get("shell_port"),
-                                      cacert, cacert)
+            cacert_host = "%s/%s" % (params.get("spice_x509_prefix"),
+                               params.get("spice_x509_cacert_file"))
+            cacert_client = cacert_host
+            if client_vm.params.get("os_type") == "linux":
+                client_session.cmd("rm -rf %s && mkdir -p %s" % (
+                               params.get("spice_x509_prefix"),
+                               params.get("spice_x509_prefix")))
+            if client_vm.params.get("os_type") == "windows":
+                cacert_client = "C:\\%s" % params.get("spice_x509_cacert_file")
+            client_vm.copy_files_to(cacert_host, cacert_client)
 
             host_tls_port = guest_vm.get_spice_var("spice_tls_port")
             host_port = guest_vm.get_spice_var("spice_port")
@@ -139,13 +140,16 @@ def launch_rv(client_vm, guest_vm, params):
             # will be attempted with the hostname, since ssl certs were
             # generated with the ip address
             hostname = socket.gethostname()
-            if ssltype == "invalid_implicit_hs":
-                spice_url = " spice://%s?tls-port=%s\&port=%s" % (hostname,
+            escape_char = client_vm.params.get("shell_escape_char",'\\')
+            if ssltype == "invalid_implicit_hs" or "explicit" in ssltype:
+                spice_url = " spice://%s?tls-port=%s%s&port=%s" % (hostname,
                                                                  host_tls_port,
+                                                                 escape_char,
                                                                  host_port)
             else:
-                spice_url = " spice://%s?tls-port=%s\&port=%s" % (host_ip,
+                spice_url = " spice://%s?tls-port=%s%s&port=%s" % (host_ip,
                                                                  host_tls_port,
+                                                                 escape_char,
                                                                  host_port)
 
             if rv_parameters_from == "menu":
@@ -156,7 +160,7 @@ def launch_rv(client_vm, guest_vm, params):
                 cmd += spice_url
 
             if not rv_parameters_from == "file":
-                cmd += " --spice-ca-file=%s" % cacert
+                cmd += " --spice-ca-file=%s" % cacert_client
 
             if ( params.get("spice_client_host_subject") == "yes" and not
                  rv_parameters_from == "file" ):
@@ -211,9 +215,9 @@ def launch_rv(client_vm, guest_vm, params):
 
     if rv_parameters_from == "file":
         print "Generating file"
-        utils_spice.gen_rv_file(params, guest_vm, host_subj, cacert)
+        utils_spice.gen_rv_file(params, guest_vm, host_subj, cacert_host)
         print "Uploading file to client"
-        client_vm.copy_files_to("rv_file.vv", "~/rv_file.vv")
+        client_vm.copy_files_to("rv_file.vv", params.get("rv_file"))
 
     # Launching the actual set of commands
     try:
@@ -241,7 +245,11 @@ def launch_rv(client_vm, guest_vm, params):
         else:
             host_port = "3128"
         if rv_parameters_from != "file":
-            client_session.cmd("export SPICE_PROXY=%s" % proxy)
+            if client_vm.params.get("os_type") == "linux":
+                client_session.cmd("export SPICE_PROXY=%s" % proxy)
+            elif client_vm.params.get("os_type") == "windows":
+                client_session.cmd_output("SET SPICE_PROXY=%s" % proxy)
+                        
 
     if not params.get("rv_verify") == "only":
         try:
@@ -271,7 +279,6 @@ def launch_rv(client_vm, guest_vm, params):
         utils_spice.wait_timeout(5)  # Wait for conncetion to establish
 
     is_rv_connected = True
-
     try:
         utils_spice.verify_established(client_vm, host_ip,
                                        host_port, rv_binary,
@@ -320,7 +327,7 @@ def launch_rv(client_vm, guest_vm, params):
     #prevent from kill remote-viewer after test finish
     if client_vm.params.get("os_type") == "linux":
         cmd = "disown -ar"
-    client_session.cmd_output(cmd)
+        client_session.cmd_output(cmd)
 
 
 def run_rv_connect(test, params, env):
@@ -342,28 +349,24 @@ def run_rv_connect(test, params, env):
         timeout=int(params.get("login_timeout", 360)))
 
     client_vm = env.get_vm(params["client_vm"])
+
     client_vm.verify_alive()
     client_session = client_vm.wait_for_login(
         timeout=int(params.get("login_timeout", 360)))
-
-    if (client_vm.params.get("os_type") == "windows" and
-       client_vm.params.get("rv_installer", None)):
-        utils_spice.install_rv_win(client_vm, params.get("rv_installer"))
-        return
 
     if params.get("clear_interface", "yes") == "yes":
         isRHEL7 = False
         for vm in params.get("vms").split():
             utils_spice.clear_interface(env.get_vm(vm),
                                        int(params.get("login_timeout", "360")))
-            session = env.get_vm(vm).wait_for_login(timeout=360)
-            output = session.cmd('cat /etc/redhat-release')
-            isRHEL7 = ("release 7." in output) or isRHEL7
+            if env.get_vm(vm).params.get("os_type") == "linux":
+                session = env.get_vm(vm).wait_for_login(timeout=360)
+                output = session.cmd('cat /etc/redhat-release')
+                isRHEL7 = ("release 7." in output) or isRHEL7
         if isRHEL7:
             utils_spice.wait_timeout(60)
         else:
             utils_spice.wait_timeout(15)
-
 
     launch_rv(client_vm, guest_vm, params)
 
