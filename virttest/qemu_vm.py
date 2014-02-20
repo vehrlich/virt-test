@@ -1749,11 +1749,6 @@ class VM(virt_vm.BaseVM):
             devices.insert(StrDev('smartcard',
                                   cmdline=add_smartcard(devices, sc_chardev, sc_id)))
 
-        if params.get("smartcard", "no") == "yes":
-            sc_chardev = params.get("smartcard_chardev")
-            sc_id = params.get("smartcard_id")
-            qemu_cmd += add_smartcard(help_text, sc_chardev, sc_id)
-
         if params.get("enable_watchdog", "no") == "yes":
             cmd = add_watchdog(devices,
                                params.get("watchdog_device_type", None),
@@ -1764,15 +1759,21 @@ class VM(virt_vm.BaseVM):
             devices_num = params.get("usb_redirection_devices")
             config_file = params.get('usb_conf_file')
             config_path = utils_misc.get_path(root_dir, config_file)
-            qemu_cmd += add_usb_redirection(config_path, devices_num)
+            #qemu_cmd += add_usb_redirection(config_path, devices_num)
+            devices.insert(StrDev('usb', 
+                                  cmdline=add_usb_redirection(config_path,
+                                                               devices_num)))
 
         if params.get("usb_redirection_add_device", "no") == "yes":
             usb_device = params.get("usb_redirection_device", "/tmp/usb.raw")
             device_size = params.get("device_size")
             bs = params.get("bs", "4k")
             usb_name = params.get("usb_name")
-            qemu_cmd += add_usb_redirection_device(usb_device, device_size,
-                                                   bs, usb_name)
+            #qemu_cmd += add_usb_redirection_device(usb_device, device_size,
+            #                                       bs, usb_name)
+            devices.insert(StrDev('usb_dev', cmdline=add_usb_redirection_device(
+                                                usb_device, device_size,
+                                                bs, usb_name)))
 
         option_roms = params.get("option_roms")
         if option_roms:
