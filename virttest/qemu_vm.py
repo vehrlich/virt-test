@@ -1265,14 +1265,14 @@ class VM(virt_vm.BaseVM):
             # register this usb controller.
             self.usb_dev_dict[usb_id] = [None] * int(usb_max_port)
             return cmd
-        
+
         def add_usb_redirection(conf_file, devices_num=3):
             """
-            Add functionality or usb redirection according to Hans blog.
-            
+            Add functionality for usb redirection according to Hans blog.
+
             @param conf_file: path to configuration file
             @param devices_num: number of devices
-            """  
+            """
 
             if not conf_file:
                 raise error.TestNAError("Configuration file for USB redirection is mandatory")
@@ -1284,27 +1284,31 @@ class VM(virt_vm.BaseVM):
 
             for i in range(1, int(devices_num) + 1):
                 cmd += " -chardev spicevmc,name=usbredir,id=usbredirchardev%d" % i
-                cmd += " -device usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,debug=3" % (i, i) 
+                cmd += " -device usb-redir,chardev=usbredirchardev%d,id=usbredirdev%d,debug=3" % (i, i)
             return cmd
-        
-        def add_usb_redirection_device(device, device_size):
+
+        def add_usb_redirection_device(device, device_size, bs, usb_name='test'):
             """
             Created USB device to qemu USB emulation.
-            Does not create device if exists
-            
+            Does not create device if exists, overwrite existing device if
+            size differs.
+
             @param device: path to file emulates USB device
-            @param device_size: size of file in human readable format k, M, G 
+            @param device_size: size of file in human readable format k, M, G
             for kilo, mega and giga ...
+            @param bs: bs for dd command
+            @param usb_name: name for usb (default 'test')
             """
+
             #ls returns 0 if device exists. Python has 0 as False.
             exist_device = os.system("ls %s" % device)
-            
+
             #device exists, could it be from previous test with different size
             if exist_device == 0:
                 actual_size = os.popen("du --apparent-size -h %s | cut -f1"
                                                % device).read().rstrip()
                 logging.debug("Actual size '%s'" % actual_size)
-                #just need to cut off .0 part 
+                #just need to cut off .0 part
                 if '.' in actual_size:
                     actual_size = "".join([
                                        actual_size.split('.')[0],
@@ -1312,16 +1316,37 @@ class VM(virt_vm.BaseVM):
                                        ])
             else:
                 actual_size = None
-            
+                logging.debug("USB device not exists")
+
+            #create image if is not exists or size differs
             if exist_device != 0 or actual_size != device_size:
-                logging.debug("Creating device %s" % device)
-                os.system('dd if=/dev/zero of=%s bs=%s count=1' % (device, 
-                                            params.get("storage_size", device_size)))
-                logging.debug("Creating filesystem ext3 on %s" % device)
-                os.system("mkfs.ext3 -F -L test -q %s " % device)
-            
+                logging.debug("Creating USB image %s" % device)
+                #get count for dd command. expect proper set of device size and bs
+                #and expect device size bigger than bs
+                #maybe cp timeout was because dd had been givem only bs and count=1
+                byte_map = {'k':1, 'M':2, 'G':3}
+
+                #convert human readable into bytes. then nice and easy get count
+                if device_size[-1] in byte_map.keys():
+                    device_size = int(device_size[:-1]) * pow(1024, byte_map[device_size[-1]])
+                if bs[-1] in byte_map.keys():
+                    bs = int(bs[:-1]) * pow(1024, byte_map[bs[-1]])
+
+                count = int(device_size)/int(bs)
+                logging.debug("Count %s" % count)
+                os.system('dd if=/dev/zero of=%s bs=%s count=%s' % (device,
+                                    bs, count))
+                logging.debug("Create loop device from image to create file system")
+                os.system("losetup -f %s" % device)
+                loop_device = aexpect.run_fg("sudo losetup -a | grep %s | cut -d':' -f1"
+                                      % device)
+                logging.debug("Loop device %s" % loop_device[1])
+                os.system("mkfs -F -t ext3 -L %s -q %s " % (usb_name, loop_device[1]))
+                os.system("sync")
+                os.system("losetup -d %s" % loop_device[1])
+
             return " -usbdevice disk:format=raw:%s" % device
-            
+
         def add_usbdevice(help_text, usb_dev, usb_type, controller_type,
                           bus=None, port=None):
             """
@@ -2111,17 +2136,20 @@ class VM(virt_vm.BaseVM):
             qemu_cmd += add_watchdog(help_text,
                                      params.get("watchdog_device_type", None),
                                      params.get("watchdog_action", "reset"))
-            
+
         if params.get("usb_redirection", "no") == "yes":
             devices_num = params.get("usb_redirection_devices")
             config_file = params.get('usb_conf_file')
             config_path = utils_misc.get_path(root_dir, config_file)
             qemu_cmd += add_usb_redirection(config_path, devices_num)
-            
+
         if params.get("usb_redirection_add_device", "no") == "yes":
             usb_device = params.get("usb_redirection_device", "/tmp/usb.raw")
             device_size = params.get("device_size")
-            qemu_cmd += add_usb_redirection_device(usb_device, device_size)  
+            bs = params.get("bs", "4k")
+            usb_name = params.get("usb_name")
+            qemu_cmd += add_usb_redirection_device(usb_device, device_size,
+                                                   bs, usb_name)
 
         option_roms = params.get("option_roms")
         if option_roms:
