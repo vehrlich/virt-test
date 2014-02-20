@@ -59,18 +59,27 @@ def run_usb_redirection(test, params, env):
             timeout=int(params.get("login_timeout", 360)),
             username="root", password="123456")
 
+    #convert human readable into bytes. then nice and easy get count
+    byte_map = {'k':1, 'M':2, 'G':3}
+    file_size = params['file_size']
+    bs = params['bs']
+    if file_size[-1] in byte_map.keys():
+        file_size = int(file_size[:-1]) * 1024 ** byte_map[file_size[-1]]
+    if bs[-1] in byte_map.keys():
+        bs = int(bs[:-1]) * 1024 ** byte_map[bs[-1]]
+    count = int(file_size)/int(bs)
+
     #create file on guest
-    guest_session.cmd("dd if=/dev/urandom of=%s%s bs=%s count=1" % (
-                      params["file_tmp_path"], 
+    guest_session.cmd("dd if=/dev/urandom of=%s%s bs=%s count=%s" % (
+                      params["file_tmp_path"],
                        params["usb_file"],
-                       params["file_size"]
-                      ), timeout=120)
+                       bs, count
+                      ), timeout=240)
     #get md5 hash
     md5sum_guest = guest_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
-                                      params["file_tmp_path"], 
+                                      params["file_tmp_path"],
                                       params["usb_file"]
                                      ))
-
     logging.info("MD5SUM on guest: %s" % md5sum_guest)
     #USB was mounted by root when tested this test. This prevents right issue
     guest_root_session.cmd("chmod 777 %s" % params["file_path"])
@@ -78,13 +87,12 @@ def run_usb_redirection(test, params, env):
     if params.get("migrate", "no") == "yes":
         copy_background = utils.InterruptedThread(
                             guest_session.cmd, ("cp %s%s %s%s" % (
-                            params["file_tmp_path"], 
+                            params["file_tmp_path"],
                             params["usb_file"],
-                            params["file_path"], 
-                            params["usb_file"]),), 
-                            kwargs={'timeout' : 300})
-        
-    
+                            params["file_path"],
+                            params["usb_file"]),),
+                            kwargs={'timeout' : 240})
+
         copy_background.start()
         try:
             while copy_background.isAlive():
@@ -98,41 +106,53 @@ def run_usb_redirection(test, params, env):
             copy_background.join()
     else:
         guest_session.cmd("cp %s%s %s%s &" % (
-                                              params["file_tmp_path"], 
+                                              params["file_tmp_path"],
                                               params["usb_file"],
-                                              params["file_path"], 
+                                              params["file_path"],
                                               params["usb_file"]
-                                              ), timeout=300)
+                                              ), timeout=240)
 
     md5sum_guest_usb = guest_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
-                                        params["file_path"], 
+                                        params["file_path"],
                                         params["usb_file"]
                                         ))
     logging.info("MD5SUM on guest USB: %s" % md5sum_guest_usb)
-    #disconnect USB
-    guest_root_session.cmd("umount %s" % params["file_path"], timeout=120)
     #USB hold by guest is freed after VM shutdown (maybe bug? Should not be closing
     #client enough?)
     guest_vm.destroy()
+    guest_session.close()
     client_session.cmd("pkill remote-viewer")
-    utils_spice.wait_timeout(10)
+
+    """
+    this is a workaround. actual qemu not supports hot plug/unplug of USB
+    so now guest has to be killet to free plugged USB
+    but there is a delay between unplug on guest and plug on client
+    so this is a workarount to wait until USB is mounted
+    """
+    while True:
+        utils_spice.wait_timeout(10)
+        get_mount = client_session.cmd_output("mount | grep %s" % params['usb_name'])
+        if get_mount:
+            logging.debug("MOUNT %s" % get_mount)
+            exit()
+
     #check md5sum on client USB
     md5sum_client_usb = client_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
-                                      params["file_path"], 
+                                      params["file_path"],
                                       params["usb_file"]
                                      ))
 
     logging.info("MD5SUM on client USB: %s" % md5sum_client_usb)
     #copy file to client
     client_session.cmd("cp %s%s %s%s" % (
-                                          params["file_path"], 
+                                          params["file_path"],
                                           params["usb_file"],
-                                          params["file_tmp_path"], 
+                                          params["file_tmp_path"],
                                           params["usb_file"]
                                           ))
     #check md5sum
     md5sum_client = client_session.cmd("md5sum %s%s | cut -f1 -d\" \"" % (
-                                      params["file_path"], 
+                                      params["file_path"],
                                       params["usb_file"]
                                      ))
     logging.info("MD5SUM on client: %s", md5sum_client)
@@ -148,4 +168,4 @@ def run_usb_redirection(test, params, env):
                              md5sum_client)
 
     client_session.close()
-    guest_session.close()
+    #guest_session.close()
