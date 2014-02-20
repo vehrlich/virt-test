@@ -1,7 +1,14 @@
-import logging, re
+import logging
+import re
 from autotest.client.shared import error
-from autotest.client import utils
-from virttest import libvirt_vm, virsh
+from virttest import virsh, utils_libvirtd
+
+
+try:
+    from virttest.staging import utils_memory
+except ImportError:
+    from autotest.client.shared import utils_memory
+
 
 def run_virsh_nodememstats(test, params, env):
     """
@@ -35,22 +42,21 @@ def run_virsh_nodememstats(test, params, env):
                                          " succeeded as the value for %s is "
                                          "deviated by %d\nThe total memory "
                                          "value is deviating-check"
-                                            % (name, delta_stats[name]))
+                                         % (name, delta_stats[name]))
             else:
                 if delta_stats[name] > delta:
                     raise error.TestFail("Command 'virsh nodememstats' not "
                                          "succeeded as the value for %s"
-                                          " is deviated by %d"
-                                            % (name, delta_stats[name]))
+                                         " is deviated by %d"
+                                         % (name, delta_stats[name]))
         return delta_stats
-
 
     # Prepare libvirtd service
     check_libvirtd = params.has_key("libvirtd")
     if check_libvirtd:
         libvirtd = params.get("libvirtd")
         if libvirtd == "off":
-            libvirt_vm.service_libvirtd_control("stop")
+            utils_libvirtd.libvirtd_stop()
 
     # Get the option for the test case
     option = params.get("virsh_nodememstats_options")
@@ -69,7 +75,7 @@ def run_virsh_nodememstats(test, params, env):
         if status_error == "yes":
             if status == 0:
                 if libvirtd == "off":
-                    libvirt_vm.service_libvirtd_control("start")
+                    utils_libvirtd.libvirtd_start()
                     raise error.TestFail("Command 'virsh nodememstats' "
                                          "succeeded with libvirtd service"
                                          " stopped, incorrect")
@@ -102,10 +108,12 @@ def run_virsh_nodememstats(test, params, env):
                         expected[name] = int(value) / 1024
 
                 # Get the actual value from /proc/meminfo and normalise to MBs
-                actual['total'] = int(utils.memtotal()) / 1024
-                actual['free'] = int(utils.freememtotal()) / 1024
-                actual['buffers'] = int(utils.read_from_meminfo('Buffers'))/1024
-                actual['cached'] = int(utils.read_from_meminfo('Cached')) / 1024
+                actual['total'] = int(utils_memory.memtotal()) / 1024
+                actual['free'] = int(utils_memory.freememtotal()) / 1024
+                actual['buffers'] = int(
+                    utils_memory.read_from_meminfo('Buffers')) / 1024
+                actual['cached'] = int(
+                    utils_memory.read_from_meminfo('Cached')) / 1024
 
                 # Currently the delta value is kept at 200 MB this can be
                 # tuned based on the accuracy
@@ -120,7 +128,7 @@ def run_virsh_nodememstats(test, params, env):
 
     # Recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.service_libvirtd_control("start")
+        utils_libvirtd.libvirtd_start()
 
     # Print the deviated values for all iterations
     if status_error == "no":

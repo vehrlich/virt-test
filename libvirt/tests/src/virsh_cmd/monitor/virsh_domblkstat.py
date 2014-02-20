@@ -1,5 +1,6 @@
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh, libvirt_xml
+from virttest import virsh, libvirt_xml, utils_libvirtd
+
 
 def run_virsh_domblkstat(test, params, env):
     """
@@ -18,9 +19,9 @@ def run_virsh_domblkstat(test, params, env):
     domid = vm.get_id()
     domuuid = vm.get_uuid()
     blklist = libvirt_xml.VMXML.get_disk_blk(vm_name)
-    if blklist == None:
+    if blklist is None:
         raise error.TestFail("Cannot find disk in %s" % vm_name)
-    #Select a block device from disks
+    # Select a block device from disks
     blk = blklist[0]
     libvirtd = params.get("libvirtd", "on")
     vm_ref = params.get("domblkstat_vm_ref")
@@ -31,7 +32,7 @@ def run_virsh_domblkstat(test, params, env):
 
     if vm_ref == "id":
         vm_ref = domid
-    elif  vm_ref == "uuid":
+    elif vm_ref == "uuid":
         vm_ref = domuuid
     elif vm_ref == "hex_id":
         vm_ref = hex(int(domid))
@@ -42,21 +43,21 @@ def run_virsh_domblkstat(test, params, env):
 
     option_list = options.split(" ")
     for option in option_list:
-        if virsh.has_command_help_match("domblkstat", option) == None:
+        if virsh.has_command_help_match("domblkstat", option) is None:
             status_error = "yes"
             break
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     result = virsh.domblkstat(vm_ref, blk, options, ignore_status=True)
     status = result.exit_status
     output = result.stdout.strip()
     err = result.stderr.strip()
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
-    #check status_error
+        utils_libvirtd.libvirtd_start()
+    # check status_error
     if status_error == "yes":
         if status == 0 or err == "":
             raise error.TestFail("Run successfully with wrong command!")

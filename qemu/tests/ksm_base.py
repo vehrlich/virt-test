@@ -1,6 +1,11 @@
-import logging, time, random, os, commands, re
+import logging
+import time
+import random
+import os
+import commands
+import re
 from autotest.client.shared import error
-from virttest import aexpect, utils_test, data_dir
+from virttest import aexpect, utils_test, utils_misc, data_dir
 
 
 @error.context_aware
@@ -11,51 +16,50 @@ def run_ksm_base(test, params, env):
     runs out of memory (it is expected to pause the guest system, wait until
     some process returns memory and bring the guest back to life)
 
-    @param test: QEMU test object.
-    @param params: Dictionary with test parameters.
-    @param env: Dictionary with the test environment.
+    :param test: QEMU test object.
+    :param params: Dictionary with test parameters.
+    :param env: Dictionary with the test environment.
     """
     def _start_allocator(vm, session, timeout):
         """
-        Execute allocator.py on a guest, wait until it is initialized.
+        Execute guest script and wait until it is initialized.
 
-        @param vm: VM object.
-        @param session: Remote session to a VM object.
-        @param timeout: Timeout that will be used to verify if allocator.py
+        :param vm: VM object.
+        :param session: Remote session to a VM object.
+        :param timeout: Timeout that will be used to verify if guest script
                 started properly.
         """
-        logging.debug("Starting allocator.py on guest %s", vm.name)
+        logging.debug("Starting guest script on guest %s", vm.name)
         session.sendline("python /tmp/ksm_overcommit_guest.py")
         try:
-            (match, data) = session.read_until_last_line_matches(
-                                                            ["PASS:", "FAIL:"],
-                                                            timeout)
-        except aexpect.ExpectProcessTerminatedError, e:
-            raise error.TestFail("Command allocator.py on vm '%s' failed: %s" %
-                                 (vm.name, str(e)))
+            _ = session.read_until_last_line_matches(["PASS:", "FAIL:"],
+                                                     timeout)
+        except aexpect.ExpectProcessTerminatedError, exc:
+            raise error.TestFail("Command guest script on vm '%s' failed: %s" %
+                                 (vm.name, str(exc)))
 
     def _execute_allocator(command, vm, session, timeout):
         """
-        Execute a given command on allocator.py main loop, indicating the vm
+        Execute a given command on guest script main loop, indicating the vm
         the command was executed on.
 
-        @param command: Command that will be executed.
-        @param vm: VM object.
-        @param session: Remote session to VM object.
-        @param timeout: Timeout used to verify expected output.
+        :param command: Command that will be executed.
+        :param vm: VM object.
+        :param session: Remote session to VM object.
+        :param timeout: Timeout used to verify expected output.
 
-        @return: Tuple (match index, data)
+        :return: Tuple (match index, data)
         """
-        logging.debug("Executing '%s' on allocator.py loop, vm: %s, timeout: %s",
-                      command, vm.name, timeout)
+        logging.debug("Executing '%s' on guest script loop, vm: %s, timeout: "
+                      "%s", command, vm.name, timeout)
         session.sendline(command)
         try:
             (match, data) = session.read_until_last_line_matches(
-                                                             ["PASS:","FAIL:"],
-                                                             timeout)
-        except aexpect.ExpectProcessTerminatedError, e:
-            e_str = ("Failed to execute command '%s' on allocator.py, "
-                     "vm '%s': %s" % (command, vm.name, str(e)))
+                ["PASS:", "FAIL:"],
+                timeout)
+        except aexpect.ExpectProcessTerminatedError, exc:
+            e_str = ("Failed to execute command '%s' on guest script, "
+                     "vm '%s': %s" % (command, vm.name, str(exc)))
             raise error.TestFail(e_str)
         return (match, data)
 
@@ -86,7 +90,7 @@ def run_ksm_base(test, params, env):
 
     query_cmd = re.sub("QEMU_PID", str(vm.process.get_pid()), query_cmd)
 
-    s, sharing_page_0 = commands.getstatusoutput(query_cmd)
+    _, sharing_page_0 = commands.getstatusoutput(query_cmd)
     if query_regex:
         sharing_page_0 = re.findall(query_regex, sharing_page_0)[0]
 
@@ -99,7 +103,7 @@ def run_ksm_base(test, params, env):
     _execute_allocator(cmd, vm, session, fill_timeout)
     time.sleep(120)
 
-    s, sharing_page_1 = commands.getstatusoutput(query_cmd)
+    _, sharing_page_1 = commands.getstatusoutput(query_cmd)
     if query_regex:
         sharing_page_1 = re.findall(query_regex, sharing_page_1)[0]
 
@@ -114,7 +118,7 @@ def run_ksm_base(test, params, env):
     _execute_allocator(cmd, vm, session, fill_timeout)
     time.sleep(120)
 
-    s, sharing_page_2 = commands.getstatusoutput(query_cmd)
+    _, sharing_page_2 = commands.getstatusoutput(query_cmd)
     if query_regex:
         sharing_page_2 = re.findall(query_regex, sharing_page_2)[0]
 
@@ -125,9 +129,9 @@ def run_ksm_base(test, params, env):
             unit = i[-1]
             index = sharing_page.index(i)
             if unit == "g":
-                sharing_page[index] = utils_test.aton(data) * 1024
+                sharing_page[index] = utils_misc.aton(data) * 1024
             else:
-                sharing_page[index] = utils_test.aton(data)
+                sharing_page[index] = utils_misc.aton(data)
 
     fail_type = 0
     if test_type == "disable":

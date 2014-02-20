@@ -1,6 +1,6 @@
-import logging
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh, remote
+from virttest import libvirt_vm, virsh, remote, utils_libvirtd
+
 
 def run_virsh_vncdisplay(test, params, env):
     """
@@ -25,14 +25,13 @@ def run_virsh_vncdisplay(test, params, env):
     domid = vm.get_id()
     domuuid = vm.get_uuid()
 
-
     def remote_case(params, vm_name):
         """
         Test remote case.
         """
-        remote_ip =  params.get("remote_ip", "REMOTE.EXAMPLE.COM")
-        local_ip =  params.get("local_ip", "LOCAL.EXAMPLE.COM")
-        remote_pwd =  params.get("remote_pwd", "")
+        remote_ip = params.get("remote_ip", "REMOTE.EXAMPLE.COM")
+        local_ip = params.get("local_ip", "LOCAL.EXAMPLE.COM")
+        remote_pwd = params.get("remote_pwd", "")
         status = 0
         output = ""
         try:
@@ -52,7 +51,6 @@ def run_virsh_vncdisplay(test, params, env):
             output = "remote test failed"
         return status, output
 
-
     if vm_ref == "id":
         vm_ref = domid
     elif vm_ref == "hex_id":
@@ -61,11 +59,11 @@ def run_virsh_vncdisplay(test, params, env):
         vm_ref = params.get(vm_ref)
     elif vm_ref == "name":
         vm_ref = "%s %s" % (vm_name, extra)
-    elif  vm_ref == "uuid":
+    elif vm_ref == "uuid":
         vm_ref = domuuid
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     if vm_ref == "remote":
         status, output = remote_case(params, vm_name)
@@ -75,9 +73,9 @@ def run_virsh_vncdisplay(test, params, env):
         output = result.stdout.strip()
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0:
             raise error.TestFail("Run successfully with wrong command!")

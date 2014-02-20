@@ -1,5 +1,5 @@
 from autotest.client.shared import error, utils
-from virttest import libvirt_vm, virsh
+from virttest import virsh, utils_libvirtd
 from xml.dom.minidom import parseString
 
 
@@ -22,8 +22,8 @@ def run_virsh_domifstat(test, params, env):
         """
         Get interface device of VM.
 
-        @param guest_name: VM's name.
-        @return: interface device of VM.
+        :param guest_name: VM's name.
+        :return: interface device of VM.
         """
         interface = ""
         domxml = utils.system_output("virsh dumpxml %s" % guest_name)
@@ -68,15 +68,15 @@ def run_virsh_domifstat(test, params, env):
     interface = "%s %s" % (interface, params.get("domifstat_extra"))
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     status = virsh.domifstat(vm_ref, interface, ignore_status=True).exit_status
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0:
             raise error.TestFail("Run successfully with wrong command!")

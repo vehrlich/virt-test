@@ -1,5 +1,10 @@
-import sys, traceback, logging
-from autotest.client.shared import openvswitch, error, utils
+import sys
+import traceback
+import logging
+from virttest import openvswitch
+from virttest import versionable_class
+from autotest.client.shared import error
+from autotest.client.shared import utils
 
 
 @error.context_aware
@@ -12,7 +17,7 @@ def run_load_module(test, params, env):
     try:
         try:
             error.context("Remove all bridge from OpenVSwitch.")
-            ovs = openvswitch.OpenVSwitch(test.tmpdir)
+            ovs = versionable_class.factory(openvswitch.OpenVSwitchSystem)(test.tmpdir)
             ovs.init_system()
             ovs.check()
             for br in ovs.list_br():

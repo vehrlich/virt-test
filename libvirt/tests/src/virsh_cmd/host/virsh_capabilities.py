@@ -1,7 +1,9 @@
-import logging, re
-from  xml.dom.minidom import parseString
+import logging
+import re
+from xml.dom.minidom import parseString
 from autotest.client.shared import utils, error
-from virttest import libvirt_vm, virsh
+from virttest import libvirt_vm, virsh, utils_libvirtd, utils_misc
+
 
 def run_virsh_capabilities(test, params, env):
     """
@@ -33,7 +35,7 @@ def run_virsh_capabilities(test, params, env):
         cpus = dom.getElementsByTagName('cpus')[0]
         host_cpus_output = cpus.getAttribute('num')
         logging.info("Host cpus num (capabilities_xml):%s",
-                      host_cpus_output)
+                     host_cpus_output)
         cmd = "less /proc/cpuinfo | grep processor | wc -l"
         cmd_result = utils.run(cmd, ignore_status=True)
         if cmp(host_cpus_output, cmd_result.stdout.strip()) != 0:
@@ -41,7 +43,11 @@ def run_virsh_capabilities(test, params, env):
                                  "wrong")
 
         # check the arch of guest supported.
-        cmd = "/usr/libexec/qemu-kvm  --cpu ? | grep qemu"
+        try:
+            img = utils_misc.find_command("qemu-kvm")
+        except ValueError:
+            raise error.TestNAError("Cannot find qemu-kvm")
+        cmd = img+" --cpu ? | grep qemu"
         cmd_result = utils.run(cmd, ignore_status=True)
         guest_wordsize_array = dom.getElementsByTagName('wordsize')
         length = len(guest_wordsize_array)
@@ -64,29 +70,28 @@ def run_virsh_capabilities(test, params, env):
             raise error.TestFail("The capabilities_xml gives an different "
                                  "hypervisor")
 
-
-    connect_uri = libvirt_vm.normalize_connect_uri( params.get("connect_uri",
-                                                               "default") )
+    connect_uri = libvirt_vm.normalize_connect_uri(params.get("connect_uri",
+                                                              "default"))
 
     # Prepare libvirtd service
     if params.has_key("libvirtd"):
         libvirtd = params.get("libvirtd")
         if libvirtd == "off":
-            libvirt_vm.service_libvirtd_control("stop")
+            utils_libvirtd.libvirtd_stop()
 
     # Run test case
     option = params.get("virsh_cap_options")
     try:
         output = virsh.capabilities(option, uri=connect_uri,
                                     ignore_status=False, debug=True)
-        status = 0 # good
+        status = 0  # good
     except error.CmdError:
-        status = 1 # bad
+        status = 1  # bad
         output = ''
 
     # Recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.service_libvirtd_control("start")
+        utils_libvirtd.libvirtd_start()
 
     # Check status_error
     status_error = params.get("status_error")

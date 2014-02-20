@@ -1,6 +1,6 @@
 import os
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh
+from virttest import virsh, utils_libvirtd
 
 
 def run_virsh_save(test, params, env):
@@ -35,7 +35,7 @@ def run_virsh_save(test, params, env):
     # prepare the environment
     if vm_ref == "name" and pre_vm_state == "paused":
         virsh.suspend(vm_name)
-    elif vm_ref == "name"  and pre_vm_state == "shut off":
+    elif vm_ref == "name" and pre_vm_state == "shut off":
         virsh.destroy(vm_name)
 
     # set the option
@@ -48,18 +48,18 @@ def run_virsh_save(test, params, env):
     elif vm_ref == "save_invalid_id" or vm_ref == "save_invalid_uuid":
         vm_ref = params.get(vm_ref)
     elif vm_ref.find("name") != -1 or vm_ref == "extra_param":
-        savefile =  "%s %s" % (savefile, extra_param)
+        savefile = "%s %s" % (savefile, extra_param)
         if vm_ref == "only_name":
             savefile = " "
         vm_ref = vm_name
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
     status = virsh.save(vm_ref, savefile, ignore_status=True).exit_status
 
     # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
     # cleanup
     if os.path.exists(savefile):

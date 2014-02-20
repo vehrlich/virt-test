@@ -1,7 +1,12 @@
-import logging, os
+import logging
+import os
 from autotest.client.shared import error
-from autotest.client import utils
 from virttest import utils_test, utils_misc, env_process
+
+try:
+    from virttest.staging import utils_memory
+except ImportError:
+    from autotest.client.shared import utils_memory
 
 
 def run_stress_kernel_compile(tests, params, env):
@@ -13,9 +18,9 @@ def run_stress_kernel_compile(tests, params, env):
        $overcommit times as host's mem.
     2) Launch kernel compile inside every guest.
 
-    @param test: QEMU test object.
-    @param params: Dictionary with the test parameters.
-    @param env: Dictionary with test environment.
+    :param test: QEMU test object.
+    :param params: Dictionary with the test parameters.
+    :param env: Dictionary with test environment.
     """
     def kernelcompile(session, vm_name):
         vm = env.get_vm(vm_name)
@@ -32,7 +37,7 @@ def run_stress_kernel_compile(tests, params, env):
                                      " in %s" % vm_name)
             else:
                 logging.info("Completed download the kernel src"
-                             " in %s" %vm_name)
+                             " in %s" % vm_name)
             test_cmd = params.get("test_cmd")
             status, output = session.cmd_status_output(test_cmd, timeout=1200)
             if status != 0:
@@ -41,7 +46,6 @@ def run_stress_kernel_compile(tests, params, env):
             status, _ = utils_test.ping(ip, count=10, timeout=30)
             if status != 0:
                 raise error.TestFail("vm no response, pls check serial log")
-
 
     over_c = float(params.get("overcommit", 1.5))
     guest_number = int(params.get("guest_number", "1"))
@@ -54,7 +58,7 @@ def run_stress_kernel_compile(tests, params, env):
     for tag in range(1, guest_number):
         params["vms"] += " stress_guest_%s" % tag
 
-    mem_host = utils.memtotal() / 1024
+    mem_host = utils_memory.memtotal() / 1024
     vmem = int(mem_host * over_c / guest_number)
 
     if vmem < 256:

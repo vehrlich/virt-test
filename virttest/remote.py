@@ -1,12 +1,23 @@
 """
 Functions and classes used for logging into guests and transferring files.
 """
-import logging, time, re
-import aexpect, utils_misc, rss_client
+import logging
+import time
+import re
+import os
+import shutil
+import tempfile
+import aexpect
+import utils_misc
+import rss_client
+
 from autotest.client.shared import error
 from autotest.client import utils
+import data_dir
+
 
 class LoginError(Exception):
+
     def __init__(self, msg, output):
         Exception.__init__(self, msg, output)
         self.msg = msg
@@ -21,11 +32,13 @@ class LoginAuthenticationError(LoginError):
 
 
 class LoginTimeoutError(LoginError):
+
     def __init__(self, output):
         LoginError.__init__(self, "Login timeout expired", output)
 
 
 class LoginProcessTerminatedError(LoginError):
+
     def __init__(self, status, output):
         LoginError.__init__(self, None, output)
         self.status = status
@@ -36,6 +49,7 @@ class LoginProcessTerminatedError(LoginError):
 
 
 class LoginBadClientError(LoginError):
+
     def __init__(self, client):
         LoginError.__init__(self, None, None)
         self.client = client
@@ -45,6 +59,7 @@ class LoginBadClientError(LoginError):
 
 
 class SCPError(Exception):
+
     def __init__(self, msg, output):
         Exception.__init__(self, msg, output)
         self.msg = msg
@@ -59,17 +74,20 @@ class SCPAuthenticationError(SCPError):
 
 
 class SCPAuthenticationTimeoutError(SCPAuthenticationError):
+
     def __init__(self, output):
         SCPAuthenticationError.__init__(self, "Authentication timeout expired",
                                         output)
 
 
 class SCPTransferTimeoutError(SCPError):
+
     def __init__(self, output):
         SCPError.__init__(self, "Transfer timeout expired", output)
 
 
 class SCPTransferFailedError(SCPError):
+
     def __init__(self, status, output):
         SCPError.__init__(self, None, output)
         self.status = status
@@ -79,25 +97,27 @@ class SCPTransferFailedError(SCPError):
                 (self.status, self.output))
 
 
-def handle_prompts(session, username, password, prompt, timeout=10, debug=False):
+def handle_prompts(session, username, password, prompt, timeout=10,
+                   debug=False):
     """
-    Log into a remote host (guest) using SSH or Telnet.  Wait for questions
-    and provide answers.  If timeout expires while waiting for output from the
-    child (e.g. a password prompt or a shell prompt) -- fail.
+    Connect to a remote host (guest) using SSH or Telnet or other else.
+    Wait for questions and provide answers.  If timeout expires while
+    waiting for output from the child (e.g. a password prompt or
+    a shell prompt) -- fail.
 
-    @brief: Log into a remote host (guest) using SSH or Telnet.
+    @brief: Connect to a remote host (guest) using SSH or Telnet or else.
 
-    @param session: An Expect or ShellSession instance to operate on
-    @param username: The username to send in reply to a login prompt
-    @param password: The password to send in reply to a password prompt
-    @param prompt: The shell prompt that indicates a successful login
-    @param timeout: The maximal time duration (in seconds) to wait for each
+    :param session: An Expect or ShellSession instance to operate on
+    :param username: The username to send in reply to a login prompt
+    :param password: The password to send in reply to a password prompt
+    :param prompt: The shell prompt that indicates a successful login
+    :param timeout: The maximal time duration (in seconds) to wait for each
             step of the login procedure (i.e. the "Are you sure" prompt, the
             password prompt, the shell prompt, etc)
-    @raise LoginTimeoutError: If timeout expires
-    @raise LoginAuthenticationError: If authentication fails
-    @raise LoginProcessTerminatedError: If the client terminates during login
-    @raise LoginError: If some other error occurs
+    :raise LoginTimeoutError: If timeout expires
+    :raise LoginAuthenticationError: If authentication fails
+    :raise LoginProcessTerminatedError: If the client terminates during login
+    :raise LoginError: If some other error occurs
     """
     password_prompt_count = 0
     login_prompt_count = 0
@@ -105,29 +125,33 @@ def handle_prompts(session, username, password, prompt, timeout=10, debug=False)
     while True:
         try:
             match, text = session.read_until_last_line_matches(
-                [r"[Aa]re you sure", r"[Pp]assword:\s*$", r"[Ll]ogin:\s*$",
+                [r"[Aa]re you sure", r"[Pp]assword:\s*",
+                 r"(?<![Ll]ast).*[Ll]ogin:\s*$",  # Don't match "Last Login:"
                  r"[Cc]onnection.*closed", r"[Cc]onnection.*refused",
-                 r"[Pp]lease wait", r"[Ww]arning", prompt],
+                 r"[Pp]lease wait", r"[Ww]arning", r"[Ee]nter.*username",
+                 r"[Ee]nter.*password", prompt],
                 timeout=timeout, internal_timeout=0.5)
             if match == 0:  # "Are you sure you want to continue connecting"
                 if debug:
                     logging.debug("Got 'Are you sure...', sending 'yes'")
                 session.sendline("yes")
                 continue
-            elif match == 1:  # "password:"
+            elif match == 1 or match == 8:  # "password:"
                 if password_prompt_count == 0:
                     if debug:
-                        logging.debug("Got password prompt, sending '%s'", password)
+                        logging.debug("Got password prompt, sending '%s'",
+                                      password)
                     session.sendline(password)
                     password_prompt_count += 1
                     continue
                 else:
                     raise LoginAuthenticationError("Got password prompt twice",
                                                    text)
-            elif match == 2:  # "login:"
+            elif match == 2 or match == 7:  # "login:"
                 if login_prompt_count == 0 and password_prompt_count == 0:
                     if debug:
-                        logging.debug("Got username prompt; sending '%s'", username)
+                        logging.debug("Got username prompt; sending '%s'",
+                                      username)
                     session.sendline(username)
                     login_prompt_count += 1
                     continue
@@ -150,7 +174,7 @@ def handle_prompts(session, username, password, prompt, timeout=10, debug=False)
                 if debug:
                     logging.debug("Got 'Warning added RSA to known host list")
                 continue
-            elif match == 7:  # prompt
+            elif match == 9:  # prompt
                 if debug:
                     logging.debug("Got shell prompt -- logged in")
                 break
@@ -165,21 +189,21 @@ def remote_login(client, host, port, username, password, prompt, linesep="\n",
     """
     Log into a remote host (guest) using SSH/Telnet/Netcat.
 
-    @param client: The client to use ('ssh', 'telnet' or 'nc')
-    @param host: Hostname or IP address
-    @param port: Port to connect to
-    @param username: Username (if required)
-    @param password: Password (if required)
-    @param prompt: Shell prompt (regular expression)
-    @param linesep: The line separator to use when sending lines
+    :param client: The client to use ('ssh', 'telnet' or 'nc')
+    :param host: Hostname or IP address
+    :param port: Port to connect to
+    :param username: Username (if required)
+    :param password: Password (if required)
+    :param prompt: Shell prompt (regular expression)
+    :param linesep: The line separator to use when sending lines
             (e.g. '\\n' or '\\r\\n')
-    @param log_filename: If specified, log all output to this file
-    @param timeout: The maximal time duration (in seconds) to wait for
+    :param log_filename: If specified, log all output to this file
+    :param timeout: The maximal time duration (in seconds) to wait for
             each step of the login procedure (i.e. the "Are you sure" prompt
             or the password prompt)
-    @raise LoginBadClientError: If an unknown client is requested
-    @raise: Whatever handle_prompts() raises
-    @return: A ShellSession object.
+    :raise LoginBadClientError: If an unknown client is requested
+    :raise: Whatever handle_prompts() raises
+    :return: A ShellSession object.
     """
     if client == "ssh":
         cmd = ("ssh -o UserKnownHostsFile=/dev/null "
@@ -206,19 +230,20 @@ def remote_login(client, host, port, username, password, prompt, linesep="\n",
     return session
 
 
-def wait_for_login(client, host, port, username, password, prompt, linesep="\n",
-                   log_filename=None, timeout=240, internal_timeout=10):
+def wait_for_login(
+    client, host, port, username, password, prompt, linesep="\n",
+        log_filename=None, timeout=240, internal_timeout=10):
     """
     Make multiple attempts to log into a remote host (guest) until one succeeds
     or timeout expires.
 
-    @param timeout: Total time duration to wait for a successful login
-    @param internal_timeout: The maximal time duration (in seconds) to wait for
+    :param timeout: Total time duration to wait for a successful login
+    :param internal_timeout: The maximal time duration (in seconds) to wait for
             each step of the login procedure (e.g. the "Are you sure" prompt
             or the password prompt)
-    @see: remote_login()
-    @raise: Whatever remote_login() raises
-    @return: A ShellSession object.
+    :see:: remote_login()
+    :raise: Whatever remote_login() raises
+    :return: A ShellSession object.
     """
     logging.debug("Attempting to log into %s:%s using %s (timeout %ds)",
                   host, port, client, timeout)
@@ -244,18 +269,18 @@ def _remote_scp(session, password_list, transfer_timeout=600, login_timeout=20):
 
     @brief: Transfer files using SCP, given a command line.
 
-    @param session: An Expect or ShellSession instance to operate on
-    @param password_list: Password list to send in reply to the password prompt
-    @param transfer_timeout: The time duration (in seconds) to wait for the
+    :param session: An Expect or ShellSession instance to operate on
+    :param password_list: Password list to send in reply to the password prompt
+    :param transfer_timeout: The time duration (in seconds) to wait for the
             transfer to complete.
-    @param login_timeout: The maximal time duration (in seconds) to wait for
+    :param login_timeout: The maximal time duration (in seconds) to wait for
             each step of the login procedure (i.e. the "Are you sure" prompt or
             the password prompt)
-    @raise SCPAuthenticationError: If authentication fails
-    @raise SCPTransferTimeoutError: If the transfer fails to complete in time
-    @raise SCPTransferFailedError: If the process terminates with a nonzero
+    :raise SCPAuthenticationError: If authentication fails
+    :raise SCPTransferTimeoutError: If the transfer fails to complete in time
+    :raise SCPTransferFailedError: If the process terminates with a nonzero
             exit code
-    @raise SCPError: If some other error occurs
+    :raise SCPError: If some other error occurs
     """
     password_prompt_count = 0
     timeout = login_timeout
@@ -275,7 +300,7 @@ def _remote_scp(session, password_list, transfer_timeout=600, login_timeout=20):
             elif match == 1:  # "password:"
                 if password_prompt_count == 0:
                     logging.debug("Got password prompt, sending '%s'" %
-                                   password_list[password_prompt_count])
+                                  password_list[password_prompt_count])
                     session.sendline(password_list[password_prompt_count])
                     password_prompt_count += 1
                     timeout = transfer_timeout
@@ -284,7 +309,7 @@ def _remote_scp(session, password_list, transfer_timeout=600, login_timeout=20):
                     continue
                 elif password_prompt_count == 1 and scp_type == 2:
                     logging.debug("Got password prompt, sending '%s'" %
-                                   password_list[password_prompt_count])
+                                  password_list[password_prompt_count])
                     session.sendline(password_list[password_prompt_count])
                     password_prompt_count += 1
                     timeout = transfer_timeout
@@ -315,16 +340,16 @@ def remote_scp(command, password_list, log_filename=None, transfer_timeout=600,
 
     @brief: Transfer files using SCP, given a command line.
 
-    @param command: The command to execute
+    :param command: The command to execute
         (e.g. "scp -r foobar root@localhost:/tmp/").
-    @param password_list: Password list to send in reply to a password prompt.
-    @param log_filename: If specified, log all output to this file
-    @param transfer_timeout: The time duration (in seconds) to wait for the
+    :param password_list: Password list to send in reply to a password prompt.
+    :param log_filename: If specified, log all output to this file
+    :param transfer_timeout: The time duration (in seconds) to wait for the
             transfer to complete.
-    @param login_timeout: The maximal time duration (in seconds) to wait for
+    :param login_timeout: The maximal time duration (in seconds) to wait for
             each step of the login procedure (i.e. the "Are you sure" prompt
             or the password prompt)
-    @raise: Whatever _remote_scp() raises
+    :raise: Whatever _remote_scp() raises
     """
     logging.debug("Trying to SCP with command '%s', timeout %ss",
                   command, transfer_timeout)
@@ -335,8 +360,8 @@ def remote_scp(command, password_list, log_filename=None, transfer_timeout=600,
         output_func = None
         output_params = ()
     session = aexpect.Expect(command,
-                                    output_func=output_func,
-                                    output_params=output_params)
+                             output_func=output_func,
+                             output_params=output_params)
     try:
         _remote_scp(session, password_list, transfer_timeout, login_timeout)
     finally:
@@ -348,16 +373,16 @@ def scp_to_remote(host, port, username, password, local_path, remote_path,
     """
     Copy files to a remote host (guest) through scp.
 
-    @param host: Hostname or IP address
-    @param username: Username (if required)
-    @param password: Password (if required)
-    @param local_path: Path on the local machine where we are copying from
-    @param remote_path: Path on the remote machine where we are copying to
-    @param limit: Speed limit of file transfer.
-    @param log_filename: If specified, log all output to this file
-    @param timeout: The time duration (in seconds) to wait for the transfer
+    :param host: Hostname or IP address
+    :param username: Username (if required)
+    :param password: Password (if required)
+    :param local_path: Path on the local machine where we are copying from
+    :param remote_path: Path on the remote machine where we are copying to
+    :param limit: Speed limit of file transfer.
+    :param log_filename: If specified, log all output to this file
+    :param timeout: The time duration (in seconds) to wait for the transfer
             to complete.
-    @raise: Whatever remote_scp() raises
+    :raise: Whatever remote_scp() raises
     """
     if (limit):
         limit = "-l %s" % (limit)
@@ -376,16 +401,16 @@ def scp_from_remote(host, port, username, password, remote_path, local_path,
     """
     Copy files from a remote host (guest).
 
-    @param host: Hostname or IP address
-    @param username: Username (if required)
-    @param password: Password (if required)
-    @param local_path: Path on the local machine where we are copying from
-    @param remote_path: Path on the remote machine where we are copying to
-    @param limit: Speed limit of file transfer.
-    @param log_filename: If specified, log all output to this file
-    @param timeout: The time duration (in seconds) to wait for the transfer
+    :param host: Hostname or IP address
+    :param username: Username (if required)
+    :param password: Password (if required)
+    :param local_path: Path on the local machine where we are copying from
+    :param remote_path: Path on the remote machine where we are copying to
+    :param limit: Speed limit of file transfer.
+    :param log_filename: If specified, log all output to this file
+    :param timeout: The time duration (in seconds) to wait for the transfer
             to complete.
-    @raise: Whatever remote_scp() raises
+    :raise: Whatever remote_scp() raises
     """
     if (limit):
         limit = "-l %s" % (limit)
@@ -405,17 +430,17 @@ def scp_between_remotes(src, dst, port, s_passwd, d_passwd, s_name, d_name,
     """
     Copy files from a remote host (guest) to another remote host (guest).
 
-    @param src/dst: Hostname or IP address of src and dst
-    @param s_name/d_name: Username (if required)
-    @param s_passwd/d_passwd: Password (if required)
-    @param s_path/d_path: Path on the remote machine where we are copying
+    :param src/dst: Hostname or IP address of src and dst
+    :param s_name/d_name: Username (if required)
+    :param s_passwd/d_passwd: Password (if required)
+    :param s_path/d_path: Path on the remote machine where we are copying
                          from/to
-    @param limit: Speed limit of file transfer.
-    @param log_filename: If specified, log all output to this file
-    @param timeout: The time duration (in seconds) to wait for the transfer
+    :param limit: Speed limit of file transfer.
+    :param log_filename: If specified, log all output to this file
+    :param timeout: The time duration (in seconds) to wait for the transfer
             to complete.
 
-    @return: True on success and False on failure.
+    :return: True on success and False on failure.
     """
     if (limit):
         limit = "-l %s" % (limit)
@@ -439,18 +464,18 @@ def nc_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
     Copy files from a remote host (guest) to another remote host (guest) using
     netcat. now this method only support linux
 
-    @param src/dst: Hostname or IP address of src and dst
-    @param s_name/d_name: Username (if required)
-    @param s_passwd/d_passwd: Password (if required)
-    @param s_path/d_path: Path on the remote machine where we are copying
-    @param c_type: Login method to remote host(guest).
-    @param c_prompt : command line prompt of remote host(guest)
-    @param d_port:  the port data transfer
-    @param d_protocol : nc protocol use (tcp or udp)
-    @param timeout: If a connection and stdin are idle for more than timeout
+    :param src/dst: Hostname or IP address of src and dst
+    :param s_name/d_name: Username (if required)
+    :param s_passwd/d_passwd: Password (if required)
+    :param s_path/d_path: Path on the remote machine where we are copying
+    :param c_type: Login method to remote host(guest).
+    :param c_prompt : command line prompt of remote host(guest)
+    :param d_port:  the port data transfer
+    :param d_protocol : nc protocol use (tcp or udp)
+    :param timeout: If a connection and stdin are idle for more than timeout
                     seconds, then the connection is silently closed.
 
-    @return: True on success and False on failure.
+    :return: True on success and False on failure.
     """
     s_session = remote_login(c_type, src, s_port, s_name, s_passwd, c_prompt)
     d_session = remote_login(c_type, dst, s_port, d_name, d_passwd, c_prompt)
@@ -468,7 +493,7 @@ def nc_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
 
     if check_sum:
         if (s_session.cmd("md5sum %s" % s_path).split()[0] !=
-            d_session.cmd("md5sum %s" % d_path).split()[0]):
+                d_session.cmd("md5sum %s" % d_path).split()[0]):
             return False
     return True
 
@@ -481,35 +506,18 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
     Copy files from a remote host (guest) to another remote host (guest) by
     udp.
 
-    @param src/dst: Hostname or IP address of src and dst
-    @param s_name/d_name: Username (if required)
-    @param s_passwd/d_passwd: Password (if required)
-    @param s_path/d_path: Path on the remote machine where we are copying
-    @param c_type: Login method to remote host(guest).
-    @param c_prompt : command line prompt of remote host(guest)
-    @param d_port:  the port data transfer
-    @param timeout: data transfer timeout
+    :param src/dst: Hostname or IP address of src and dst
+    :param s_name/d_name: Username (if required)
+    :param s_passwd/d_passwd: Password (if required)
+    :param s_path/d_path: Path on the remote machine where we are copying
+    :param c_type: Login method to remote host(guest).
+    :param c_prompt : command line prompt of remote host(guest)
+    :param d_port:  the port data transfer
+    :param timeout: data transfer timeout
 
     """
     s_session = remote_login(c_type, src, s_port, s_name, s_passwd, c_prompt)
     d_session = remote_login(c_type, dst, s_port, d_name, d_passwd, c_prompt)
-
-    def send_cmd_safe(session, cmd, timeout=360):
-        logging.debug("Sending command: %s", cmd)
-        session.sendline(cmd)
-        output = ""
-        got_prompt = False
-        start_time = time.time()
-        # Wait for shell prompt until timeout.
-        while ((time.time() - start_time) < timeout and not got_prompt):
-            time.sleep(0.2)
-            session.sendline()
-            try:
-                output += session.read_up_to_prompt()
-                got_prompt = True
-            except aexpect.ExpectTimeoutError:
-                pass
-        return output
 
     def get_abs_path(session, filename, extension):
         """
@@ -517,7 +525,7 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
         """
         cmd_tmp = "wmic datafile where \"Filename='%s' and "
         cmd_tmp += "extension='%s'\" get drive^,path"
-        cmd = cmd_tmp %  (filename, extension)
+        cmd = cmd_tmp % (filename, extension)
         info = session.cmd_output(cmd, timeout=360).strip()
         drive_path = re.search(r'(\w):\s+(\S+)', info, re.M)
         if not drive_path:
@@ -537,7 +545,7 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
             filename = file_path.split("\\")[-1]
             md5_reg = r"%s\s+(\w+)" % filename
             md5_cmd = '%smd5sums.exe %s | find "%s"' % (drive_path, file_path,
-                                                         filename)
+                                                        filename)
         o = session.cmd_output(md5_cmd)
         file_md5 = re.findall(md5_reg, o)
         if not o:
@@ -558,12 +566,12 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
 
     def start_server(session):
         if c_type == "ssh":
-            start_cmd = "sendfile %s &"  % d_port
+            start_cmd = "sendfile %s &" % d_port
         else:
-            drive_path =  get_abs_path(session, "sendfile", "exe")
+            drive_path = get_abs_path(session, "sendfile", "exe")
             start_cmd = "start /b %ssendfile.exe %s" % (drive_path,
-                                                           d_port)
-        send_cmd_safe(session, start_cmd)
+                                                        d_port)
+        session.cmd_output_safe(start_cmd)
         if not server_alive(session):
             raise error.TestError("Start udt server failed")
 
@@ -572,12 +580,12 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
             client_cmd = "recvfile %s %s %s %s" % (src, d_port,
                                                    s_path, d_path)
         else:
-            drive_path =  get_abs_path(session, "recvfile", "exe")
+            drive_path = get_abs_path(session, "recvfile", "exe")
             client_cmd_tmp = "%srecvfile.exe %s %s %s %s"
-            client_cmd = client_cmd_tmp  % (drive_path, src, d_port,
-                                            s_path.split("\\")[-1],
-                                            d_path.split("\\")[-1])
-        send_cmd_safe(session, client_cmd, timeout)
+            client_cmd = client_cmd_tmp % (drive_path, src, d_port,
+                                           s_path.split("\\")[-1],
+                                           d_path.split("\\")[-1])
+        session.cmd_output_safe(client_cmd, timeout)
 
     def stop_server(session):
         if c_type == "ssh":
@@ -585,7 +593,7 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
         else:
             stop_cmd = "taskkill /F /IM sendfile.exe"
         if server_alive(session):
-            send_cmd_safe(session, stop_cmd)
+            session.cmd_output_safe(stop_cmd)
 
     try:
         src_md5 = get_file_md5(s_session, s_path)
@@ -596,8 +604,8 @@ def udp_copy_between_remotes(src, dst, s_port, s_passwd, d_passwd,
         if src_md5 != dst_md5:
             err_msg = "Files md5sum mismatch, file %s md5sum is '%s', "
             err_msg = "but the file %s md5sum is %s"
-            raise error.TestError(err_msg  % (s_path, src_md5,
-                                              d_path, dst_md5))
+            raise error.TestError(err_msg % (s_path, src_md5,
+                                             d_path, dst_md5))
     finally:
         stop_server(s_session)
         s_session.close()
@@ -610,18 +618,18 @@ def copy_files_to(address, client, username, password, port, local_path,
     """
     Copy files to a remote host (guest) using the selected client.
 
-    @param client: Type of transfer client
-    @param username: Username (if required)
-    @param password: Password (if requried)
-    @param local_path: Path on the local machine where we are copying from
-    @param remote_path: Path on the remote machine where we are copying to
-    @param address: Address of remote host(guest)
-    @param limit: Speed limit of file transfer.
-    @param log_filename: If specified, log all output to this file (SCP only)
-    @param verbose: If True, log some stats using logging.debug (RSS only)
-    @param timeout: The time duration (in seconds) to wait for the transfer to
+    :param client: Type of transfer client
+    :param username: Username (if required)
+    :param password: Password (if requried)
+    :param local_path: Path on the local machine where we are copying from
+    :param remote_path: Path on the remote machine where we are copying to
+    :param address: Address of remote host(guest)
+    :param limit: Speed limit of file transfer.
+    :param log_filename: If specified, log all output to this file (SCP only)
+    :param verbose: If True, log some stats using logging.debug (RSS only)
+    :param timeout: The time duration (in seconds) to wait for the transfer to
             complete.
-    @raise: Whatever remote_scp() raises
+    :raise: Whatever remote_scp() raises
     """
     if client == "scp":
         scp_to_remote(address, port, username, password, local_path,
@@ -641,18 +649,18 @@ def copy_files_from(address, client, username, password, port, remote_path,
     """
     Copy files from a remote host (guest) using the selected client.
 
-    @param client: Type of transfer client
-    @param username: Username (if required)
-    @param password: Password (if requried)
-    @param remote_path: Path on the remote machine where we are copying from
-    @param local_path: Path on the local machine where we are copying to
-    @param address: Address of remote host(guest)
-    @param limit: Speed limit of file transfer.
-    @param log_filename: If specified, log all output to this file (SCP only)
-    @param verbose: If True, log some stats using logging.debug (RSS only)
-    @param timeout: The time duration (in seconds) to wait for the transfer to
+    :param client: Type of transfer client
+    :param username: Username (if required)
+    :param password: Password (if requried)
+    :param remote_path: Path on the remote machine where we are copying from
+    :param local_path: Path on the local machine where we are copying to
+    :param address: Address of remote host(guest)
+    :param limit: Speed limit of file transfer.
+    :param log_filename: If specified, log all output to this file (SCP only)
+    :param verbose: If True, log some stats using logging.debug (RSS only)
+    :param timeout: The time duration (in seconds) to wait for the transfer to
     complete.
-    @raise: Whatever remote_scp() raises
+    :raise: Whatever remote_scp() raises
     """
     if client == "scp":
         scp_from_remote(address, port, username, password, remote_path,
@@ -664,3 +672,248 @@ def copy_files_from(address, client, username, password, port, remote_path,
         c = rss_client.FileDownloadClient(address, port, log_func)
         c.download(remote_path, local_path, timeout)
         c.close()
+
+
+class RemoteFile(object):
+
+    """
+    Class to handle the operations of file on remote host or guest.
+    """
+
+    def __init__(self, address, client, username, password, port,
+                 remote_path, limit="", log_filename=None,
+                 verbose=False, timeout=600):
+        """
+        Initialization of RemoteFile class.
+
+        :param address: Address of remote host(guest)
+        :param client: Type of transfer client
+        :param username: Username (if required)
+        :param password: Password (if requried)
+        :param remote_path: Path of file which we want to edit on remote.
+        :param limit: Speed limit of file transfer.
+        :param log_filename: If specified, log all output to this file(SCP only)
+        :param verbose: If True, log some stats using logging.debug (RSS only)
+        :param timeout: The time duration (in seconds) to wait for the
+                        transfer tocomplete.
+        """
+        self.address = address
+        self.client = client
+        self.username = username
+        self.password = password
+        self.port = port
+        self.remote_path = remote_path
+        self.limit = limit
+        self.log_filename = log_filename
+        self.verbose = verbose
+        self.timeout = timeout
+
+        # Get a local_path and all actions is taken on it.
+        filename = os.path.basename(self.remote_path)
+
+        # Get a local_path.
+        tmp_dir = data_dir.get_tmp_dir()
+        local_file = tempfile.NamedTemporaryFile(prefix=("%s_" % filename),
+                                                 dir=tmp_dir)
+        self.local_path = local_file.name
+        local_file.close()
+
+        # Get a backup_path.
+        backup_file = tempfile.NamedTemporaryFile(prefix=("%s_" % filename),
+                                                  dir=tmp_dir)
+        self.backup_path = backup_file.name
+        backup_file.close()
+
+        # Get file from remote.
+        self._pull_file()
+        # Save a backup.
+        shutil.copy(self.local_path, self.backup_path)
+
+    def __del__(self):
+        """
+        Called when the instance is about to be destroyed.
+        """
+        self._reset_file()
+        if os.path.exists(self.backup_path):
+            os.remove(self.backup_path)
+        if os.path.exists(self.local_path):
+            os.remove(self.local_path)
+
+    def _pull_file(self):
+        """
+        Copy file from remote to local.
+        """
+        if self.client == "test":
+            shutil.copy(self.remote_path, self.local_path)
+        else:
+            copy_files_from(self.address, self.client, self.username,
+                            self.password, self.port, self.remote_path,
+                            self.local_path, self.limit, self.log_filename,
+                            self.verbose, self.timeout)
+
+    def _push_file(self):
+        """
+        Copy file from local to remote.
+        """
+        if self.client == "test":
+            shutil.copy(self.local_path, self.remote_path)
+        else:
+            copy_files_to(self.address, self.client, self.username,
+                          self.password, self.port, self.local_path,
+                          self.remote_path, self.limit, self.log_filename,
+                          self.verbose, self.timeout)
+
+    def _reset_file(self):
+        """
+        Copy backup from local to remote.
+        """
+        if self.client == "test":
+            shutil.copy(self.backup_path, self.remote_path)
+        else:
+            copy_files_to(self.address, self.client, self.username,
+                          self.password, self.port, self.backup_path,
+                          self.remote_path, self.limit, self.log_filename,
+                          self.verbose, self.timeout)
+
+    def _read_local(self):
+        """
+        Read file on local_path.
+
+        :return: string list got from readlines().
+        """
+        local_file = open(self.local_path, "r")
+        lines = local_file.readlines()
+        local_file.close()
+        return lines
+
+    def _write_local(self, lines):
+        """
+        Write file on local_path. Call writelines method of File.
+        """
+        local_file = open(self.local_path, "w")
+        local_file.writelines(lines)
+        local_file.close()
+
+    def add(self, line_list):
+        """
+        Append lines in line_list into file on remote.
+        """
+        lines = self._read_local()
+        for line in line_list:
+            lines.append("\n%s" % line)
+        self._write_local(lines)
+        self._push_file()
+
+    def sub(self, pattern2repl_dict):
+        """
+        Replace the string which match the pattern
+        to the value contained in pattern2repl_dict.
+        """
+        lines = self._read_local()
+        for pattern, repl in pattern2repl_dict.items():
+            for index in range(len(lines)):
+                line = lines[index]
+                lines[index] = re.sub(pattern, repl, line)
+        self._write_local(lines)
+        self._push_file()
+
+    def remove(self, pattern_list):
+        """
+        Remove the lines in remote file which matchs a pattern
+        in pattern_list.
+        """
+        lines = self._read_local()
+        for pattern in pattern_list:
+            for index in range(len(lines)):
+                line = lines[index]
+                if re.match(pattern, line):
+                    lines.remove(line)
+                    # Check this line is the last one or not.
+                    if (not line.endswith('\n') and (index > 0)):
+                        lines[index - 1] = lines[index - 1].rstrip("\n")
+        self._write_local(lines)
+        self._push_file()
+
+    def sub_else_add(self, pattern2repl_dict):
+        """
+        Replace the string which match the pattern.
+        If no match in the all lines, append the value
+        to the end of file.
+        """
+        lines = self._read_local()
+        for pattern, repl in pattern2repl_dict.items():
+            no_line_match = True
+            for index in range(len(lines)):
+                line = lines[index]
+                if re.match(pattern, line):
+                    no_line_match = False
+                    lines[index] = re.sub(pattern, repl, line)
+            if no_line_match:
+                lines.append("\n%s" % repl)
+        self._write_local(lines)
+        self._push_file()
+
+
+class RemoteRunner(object):
+
+    """
+    Class to provide a utils.run-like method to execute command on
+    remote host or guest. Provide a similar interface with utils.run
+    on local.
+    """
+
+    def __init__(self, client, host, port, username, password, prompt,
+                 linesep="\n", log_filename=None, timeout=240,
+                 internal_timeout=10):
+        """
+        Initialization of RemoteRunner. Init a session login to remote host or
+        guest.
+
+        :param client: The client to use ('ssh', 'telnet' or 'nc')
+        :param host: Hostname or IP address
+        :param port: Port to connect to
+        :param username: Username (if required)
+        :param password: Password (if required)
+        :param prompt: Shell prompt (regular expression)
+        :param linesep: The line separator to use when sending lines
+                (e.g. '\\n' or '\\r\\n')
+        :param log_filename: If specified, log all output to this file
+        :param timeout: Total time duration to wait for a successful login
+        :param internal_timeout: The maximal time duration (in seconds) to wait for
+                each step of the login procedure (e.g. the "Are you sure" prompt
+                or the password prompt)
+        :see: wait_for_login()
+        :raise: Whatever wait_for_login() raises
+        """
+        self.session = wait_for_login(client, host, port, username, password,
+                                      prompt, linesep, log_filename,
+                                      timeout, internal_timeout)
+        # Init stdout pipe and stderr pipe.
+        self.stdout_pipe = tempfile.mktemp()
+        self.stderr_pipe = tempfile.mktemp()
+
+    def run(self, command, timeout=60, ignore_status=False):
+        """
+        Method to provide a utils.run-like interface to execute command on
+        remote host or guest.
+
+        :param timeout: Total time duration to wait for command return.
+        :param ignore_status: If ignore_status=True, do not raise an exception,
+                              no matter what the exit code of the command is.
+                              Else, raise CmdError if exit code of command is not
+                              zero.
+        """
+        # Redirect the stdout and stderr to file, Deviding error message
+        # from output, and taking off the color of output. To return the same
+        # result with utils.run() function.
+        command = "%s 1>%s 2>%s" % (command, self.stdout_pipe, self.stderr_pipe)
+        status, _ = self.session.cmd_status_output(command, timeout=timeout)
+        output = self.session.cmd_output("cat %s;rm -f %s" %
+                                         (self.stdout_pipe, self.stdout_pipe))
+        errput = self.session.cmd_output("cat %s;rm -f %s" %
+                                        (self.stderr_pipe, self.stderr_pipe))
+        cmd_result = utils.CmdResult(command=command, exit_status=status,
+                                     stdout=output, stderr=errput)
+        if (status and (not ignore_status)):
+            raise error.CmdError(command, cmd_result)
+        return cmd_result

@@ -1,8 +1,13 @@
 import logging
 from autotest.client.shared import error
 from autotest.client import utils
-from virttest.utils_cgroup import Cgroup, CgroupModules
 from virttest.env_process import preprocess
+
+try:
+    from virttest.staging.utils_cgroup import Cgroup, CgroupModules
+except ImportError:
+    # TODO: Obsoleted path used prior autotest-0.15.2/virttest-2013.06.24
+    from autotest.client.shared.utils_cgroup import Cgroup, CgroupModules
 
 
 @error.context_aware
@@ -13,16 +18,16 @@ def run_vhost_with_cgroup(test, params, env):
         2. add vhost-%pid_qemu process to a cgroup
         3. check the vhost process join to the cgroup successfully
 
-        @param test: QEMU test object
-        @param params: Dictionary with the test parameters
-        @param env: Dictionary with test environment.
+        :param test: QEMU test object
+        :param params: Dictionary with the test parameters
+        :param env: Dictionary with test environment.
     """
     def assign_vm_into_cgroup(vm, cgroup, pwd=None):
         """
         Assigns all threads of VM into cgroup
-        @param vm: desired VM
-        @param cgroup: cgroup handler
-        @param pwd: desired cgroup's pwd, cgroup index or None for root cgroup
+        :param vm: desired VM
+        :param cgroup: cgroup handler
+        :param pwd: desired cgroup's pwd, cgroup index or None for root cgroup
         """
         cgroup.set_cgroup(vm.get_shell_pid(), pwd)
         for pid in utils.get_children_pids(vm.get_shell_pid()):
@@ -30,7 +35,6 @@ def run_vhost_with_cgroup(test, params, env):
                 cgroup.set_cgroup(int(pid), pwd)
             except Exception:   # Process might not already exist
                 raise error.TestFail("Failed to move all VM threads to cgroup")
-
 
     error.context("Test Setup: Cgroup initialize in host", logging.info)
     modules = CgroupModules()

@@ -1,14 +1,21 @@
 #!/usr/bin/env python
 
-import sys, os, getpass, datetime
+import sys
+import os
+import getpass
+import datetime
 from github import Github
 from github_issues import GithubIssues
-
-repo_full_name = 'autotest/virt-test'
 
 gh = Github(login_or_token=raw_input("Enter github username: "),
             password=getpass.getpass('Enter github password: '),
             user_agent='PyGithub/Python')
+
+print "Enter location (<user>/<repo>)",
+repo_full_name = 'autotest/virt-test'
+repo_full_name = raw_input("or blank for '%s': "
+                           % repo_full_name).strip() or repo_full_name
+
 print
 
 issues = GithubIssues(gh, repo_full_name)
@@ -35,7 +42,7 @@ while True:
     if label:
         try:
             # http://jacquev6.github.io
-            #       /PyGithub/github_objects/Label.html#github.Label.Label
+            # /PyGithub/github_objects/Label.html#github.Label.Label
             labels.append(issues.get_gh_label(label).name)
         except ValueError, detail:
             print str(detail)
@@ -51,8 +58,8 @@ print
 #            sort - str - 'created', 'updated', 'comments'
 #            direction - str - 'asc', 'desc'
 #            since - datetime.datetime
-criteria = {'state':'closed', 'labels':labels,
-            'sort':'updated', 'since':since}
+criteria = {'state': 'closed', 'labels': labels,
+            'sort': 'updated', 'since': since}
 
 heading = ("Applied %s pull-requests from %s since %s  by author"
            % (",".join(labels), repo_full_name, since.isoformat()))

@@ -1,4 +1,5 @@
-import logging, re
+import logging
+import re
 from autotest.client import utils
 from virttest import utils_misc
 from autotest.client.shared import error
@@ -14,9 +15,9 @@ def run_boot_order_check(test, params, env):
        should try device whose bootindex=2, and so on, till
        the guest os succeeds to boot or fails to boot
 
-    @param test: kvm test object
-    @param params: Dictionary with the test parameters
-    @param env: Dictionary with test environment
+    :param test: kvm test object
+    :param params: Dictionary with the test parameters
+    :param env: Dictionary with test environment
     """
     error.context("Boot vm by passing boot order decided", logging.info)
     vm = env.get_vm(params["main_vm"])
@@ -41,18 +42,31 @@ def run_boot_order_check(test, params, env):
     list_nic_addr = []
 
     # As device id in the last line of info pci output
-    # We need reverse the pci infomation to get the pci addr which is in the
+    # We need reverse the pci information to get the pci addr which is in the
     # front row.
     pci_info = vm.monitor.info("pci")
-    pci_list = str(pci_info).split("\n")
-    pci_list.reverse()
-    pci_info = " ".join(pci_list)
-    for nic in vm.virtnet:
-        nic_addr = re.findall(nic_addr_filter % nic.device_id, pci_info)
-        bootindex = "0%x" % int(params['bootindex_%s' % nic.nic_name])
-        list_nic_addr.append((nic_addr, bootindex[-2]))
+    nic_slots = {}
+    if isinstance(pci_info, list):
+        pci_devices = pci_info[0]['devices']
+        for device in pci_devices:
+            if device['class_info']['desc'] == "Ethernet controller":
+                nic_slots[device['qdev_id']] = device['slot']
+    else:
+        pci_list = str(pci_info).split("\n")
+        pci_list.reverse()
+        pci_info = " ".join(pci_list)
 
-    list_nic_addr.sort(cmp = lambda x,y: cmp(x[1], y[1]))
+    for nic in vm.virtnet:
+        if nic_slots:
+            nic_addr = nic_slots[nic.device_id]
+        else:
+            nic_addr = re.findall(nic_addr_filter % nic.device_id,
+                                  pci_info)[0]
+        nic_addr = "0%s" % nic_addr
+        bootindex = int(params['bootindex_%s' % nic.nic_name])
+        list_nic_addr.append((nic_addr[-2:], bootindex))
+
+    list_nic_addr.sort(cmp=lambda x, y: cmp(x[1], y[1]))
 
     boot_fail_infos = boot_fail_infos % (list_nic_addr[0][0],
                                          list_nic_addr[1][0],
@@ -61,14 +75,14 @@ def run_boot_order_check(test, params, env):
     error.context("Check the guest boot result", logging.info)
     if bootorder_type == "type2":
         session_serial = vm.wait_for_serial_login(timeout=timeout)
-        output = vm.serial_console.get_output()
+        output = vm.serial_console.get_stripped_output()
         session_serial.close()
     else:
         f = lambda: re.search("No bootable device.",
-                              vm.serial_console.get_output())
+                              vm.serial_console.get_stripped_output())
         utils_misc.wait_for(f, timeout, 1)
 
-        output = vm.serial_console.get_output()
+        output = vm.serial_console.get_stripped_output()
 
     # find and replace some ascii characters to non-ascii char,
     # like as: '\b' (backspace)
@@ -76,7 +90,7 @@ def run_boot_order_check(test, params, env):
         data = re.sub(r".%s" % backspace_char, "", output)
     else:
         data = output
-    result = re.findall(boot_fail_infos, data, re.S|re.M|re.I)
+    result = re.findall(boot_fail_infos, data, re.S | re.M | re.I)
 
     if not result:
         raise error.TestFail("Got a wrong boot order, "

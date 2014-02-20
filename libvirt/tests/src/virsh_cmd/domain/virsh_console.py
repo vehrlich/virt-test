@@ -1,4 +1,5 @@
-import re, logging
+import re
+import logging
 from autotest.client.shared import error
 from virttest import aexpect
 from virttest.libvirt_xml import vm_xml, xcepts
@@ -17,12 +18,11 @@ def xml_console_recover(vmxml):
     """
     Recover older xml config with backup vmxml.
     """
-    try:
-        vmxml.undefine()
-        vmxml.define()
+    vmxml.undefine()
+    if vmxml.define():
         return True
-    except xcepts.LibvirtXMLError, detail:
-        logging.error("Recover older serial failed:%s.", detail)
+    else:
+        logging.error("Recover older serial failed:%s.", vmxml.get('xml'))
         return False
 
 
@@ -66,9 +66,9 @@ def verify_virsh_console(session, user, passwd, debug=False):
     try:
         while True:
             match, text = session.read_until_last_line_matches(
-                          [r"[E|e]scape character is", r"login:",
-                           r"[P|p]assword:", session.prompt],
-                          timeout=10, internal_timeout=1)
+                [r"[E|e]scape character is", r"login:",
+                 r"[P|p]assword:", session.prompt],
+                timeout=10, internal_timeout=1)
 
             if match == 0:
                 if debug:

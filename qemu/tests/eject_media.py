@@ -1,4 +1,5 @@
-import logging, time, commands
+import logging
+import time
 from autotest.client.shared import error
 from virttest import utils_misc
 
@@ -14,11 +15,11 @@ def run_eject_media(test, params, env):
     5) Insert new image to cdrom.
     6) Eject device after add new image by change command.
     7) Insert original cdrom to cdrom.
-    8) Try to eject non-removable device.
+    8) Try to eject non-removable device w/o force option.
 
-    @param test: QEMU test object
-    @param params: Dictionary with the test parameters
-    @param env: Dictionary with test environment
+    :param test: QEMU test object
+    :param params: Dictionary with the test parameters
+    :param env: Dictionary with test environment
     """
 
     if not utils_misc.qemu_has_option("qmp"):
@@ -88,9 +89,13 @@ def run_eject_media(test, params, env):
     device_name = vm.get_block(p_dict)
     if device_name is None:
         raise error.TestFail("Could not find non-removable device")
-    eject_cmd = "eject device=%s," % device_name
+    if params.get("force_eject", "no") == "yes":
+        if not qmp_used:
+            eject_cmd = "eject -f %s " % device_name
+    else:
+        eject_cmd = "eject device=%s," % device_name
     try:
-        output = vm.monitor.send_args_cmd(eject_cmd)
+        vm.monitor.send_args_cmd(eject_cmd)
     except Exception, e:
         logging.debug("Catch exception message: %s" % e)
     logging.info("Wait until device is ejected")

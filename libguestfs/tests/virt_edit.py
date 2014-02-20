@@ -1,6 +1,7 @@
-import logging, re
+import logging
+import re
 from autotest.client.shared import utils, error
-from virttest import libvirt_vm
+from virttest import libvirt_vm, utils_libvirtd
 import virttest.utils_libguestfs as lgf
 
 
@@ -19,7 +20,8 @@ def login_to_check_foo_line(vm, file_ref, foo_line):
         cat_file = session.cmd_output("cat %s" % file_ref)
         logging.info("\n%s", cat_file)
         session.cmd("cp -f %s %s" % (file_ref, backup))
-        session.cmd("sed -e \'s/%s$//g\' %s > %s" % (foo_line, backup, file_ref))
+        session.cmd("sed -e \'s/%s$//g\' %s > %s" %
+                    (foo_line, backup, file_ref))
         session.cmd('rm -f %s' % backup)
         session.close()
     except Exception, detail:
@@ -45,8 +47,8 @@ def run_virt_edit(test, params, env):
 
     vm_name = params.get("main_vm")
     vm = env.get_vm(vm_name)
-    uri = libvirt_vm.normalize_connect_uri( params.get("connect_uri",
-                                                       "default"))
+    uri = libvirt_vm.normalize_connect_uri(params.get("connect_uri",
+                                                      "default"))
     start_vm = params.get("start_vm", "no")
     vm_ref = params.get("virt_edit_vm_ref", vm_name)
     file_ref = params.get("virt_edit_file_ref", "/etc/hosts")
@@ -61,7 +63,7 @@ def run_virt_edit(test, params, env):
     if vm.is_alive() and start_vm == "no":
         vm.destroy(gracefully=True)
 
-    dom_disk_dict = vm.get_disk_devices() # TODO
+    dom_disk_dict = vm.get_disk_devices()  # TODO
     dom_uuid = vm.get_uuid()
 
     if vm_ref == "domdisk":
@@ -88,7 +90,7 @@ def run_virt_edit(test, params, env):
     # Stop libvirtd if test need.
     libvirtd = params.get("libvirtd", "on")
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     # Run test
     virsh_dargs = {'ignore_status': True, 'debug': True, 'uri': uri}
@@ -98,7 +100,7 @@ def run_virt_edit(test, params, env):
 
     # Recover libvirtd.
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
     utils.run("rm -f %s" % created_img)
 

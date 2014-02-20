@@ -10,16 +10,15 @@ from virttest.libvirt_xml.devices import base
 
 class Address(base.TypedDeviceBase):
 
-    __slots__ = base.TypedDeviceBase.__slots__ + ('attributes',)
-
+    __slots__ = base.TypedDeviceBase.__slots__ + ('attrs',)
 
     def __init__(self, type_name, virsh_instance=base.base.virsh):
-        super(Address, self).__init__(device_tag='address',
-                                      type_name=type_name,
-                                      virsh_instance=virsh_instance)
         # Blindly accept any/all attributes as simple dictionary
-        accessors.XMLElementDict('attributes', self, None, '/', 'address')
-
+        accessors.XMLElementDict('attrs', self, parent_xpath='/',
+                                 tag_name='address')
+        super(self.__class__, self).__init__(device_tag='address',
+                                             type_name=type_name,
+                                             virsh_instance=virsh_instance)
 
     @classmethod
     def new_from_dict(cls, attributes, virsh_instance=base.base.virsh):
@@ -36,7 +35,6 @@ class Address(base.TypedDeviceBase):
         for key, value in attributes.items():
             xtfroot.set(key, value)
         return instance
-
 
     @classmethod
     def new_from_element(cls, element, virsh_instance=base.base.virsh):

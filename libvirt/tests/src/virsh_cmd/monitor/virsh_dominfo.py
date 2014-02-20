@@ -1,5 +1,6 @@
-from autotest.client.shared import  error
-from virttest import libvirt_vm, remote, virsh
+from autotest.client.shared import error
+from virttest import libvirt_vm, remote, virsh, utils_libvirtd
+
 
 def run_virsh_dominfo(test, params, env):
     """
@@ -25,7 +26,6 @@ def run_virsh_dominfo(test, params, env):
     extra = params.get("dominfo_extra", "")
     status_error = params.get("status_error", "no")
     libvirtd = params.get("libvirtd", "on")
-
 
     def remote_test(params, vm_name):
         """
@@ -57,8 +57,7 @@ def run_virsh_dominfo(test, params, env):
             err = "remote test failed"
         return status, output, err
 
-
-    #run test case
+    # run test case
     if vm_ref == "id":
         vm_ref = domid
     elif vm_ref == "hex_id":
@@ -71,7 +70,7 @@ def run_virsh_dominfo(test, params, env):
         vm_ref = domuuid
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     if vm_ref != "remote":
         result = virsh.dominfo(vm_ref, ignore_status=True)
@@ -81,11 +80,11 @@ def run_virsh_dominfo(test, params, env):
     else:
         status, output, err = remote_test(params, vm_name)
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0 or err == "":
             raise error.TestFail("Run successfully with wrong command!")

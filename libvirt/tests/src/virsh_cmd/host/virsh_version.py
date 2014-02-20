@@ -1,5 +1,5 @@
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh
+from virttest import libvirt_vm, virsh, utils_libvirtd
 
 
 def run_virsh_version(test, params, env):
@@ -11,28 +11,28 @@ def run_virsh_version(test, params, env):
     (3) Call virsh version with libvirtd service stop
     """
 
-    connect_uri = libvirt_vm.normalize_connect_uri( params.get("connect_uri",
-                                                               "default") )
+    connect_uri = libvirt_vm.normalize_connect_uri(params.get("connect_uri",
+                                                              "default"))
 
     # Prepare libvirtd service
     check_libvirtd = params.has_key("libvirtd")
     if check_libvirtd:
         libvirtd = params.get("libvirtd")
         if libvirtd == "off":
-            libvirt_vm.libvirtd_stop()
+            utils_libvirtd.libvirtd_stop()
 
     # Run test case
     option = params.get("virsh_version_options")
     try:
         output = virsh.version(option, uri=connect_uri,
                                ignore_status=False, debug=True)
-        status = 0 #good
+        status = 0  # good
     except error.CmdError:
-        status = 1 #bad
+        status = 1  # bad
 
     # Recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
     # Check status_error
     status_error = params.get("status_error")

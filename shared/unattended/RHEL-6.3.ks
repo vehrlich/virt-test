@@ -31,6 +31,8 @@ KVM_TEST_LOGGING
 @basic-desktop
 @fonts
 @Smart Card Support
+gnome-utils
+python-imaging
 NetworkManager
 ntpdate
 watchdog
@@ -40,36 +42,36 @@ spice-xpi
 virt-viewer
 spice-vdagent
 usbredir
-SDL
 totem
 %end
 
-%post --interpreter /usr/bin/python
-import os
-os.system('grubby --remove-args="rhgb quiet" --update-kernel=$(grubby --default-kernel)')
-os.system('dhclient')
-os.system('chkconfig sshd on')
-os.system('iptables -F')
-os.system('echo 0 > /selinux/enforce')
-os.system('echo Post set up finished > /dev/ttyS0')
-os.system('echo Post set up finished > /dev/hvc0')
-
-f = open('/etc/gdm/custom.conf','w')
-f.write('[daemon]\n'
-        'AutomaticLogin=test\n'
-        'AutomaticLoginEnable=True\n')
-f.close()
-f = open('/etc/sudoers','a')
-f.write('test ALL = NOPASSWD: /sbin/shutdown -r now,/sbin/shutdown -h now\n')
-f.close()
-f = open('/home/test/.bashrc','a')
-f.write('alias shutdown=\'sudo shutdown\'\n')
-f.close()
-f = open('/etc/rc.modules','w')
-f.write('modprobe snd-aloop\n'
-        'modprobe snd-pcm-oss\n'
-        'modprobe snd-mixer-oss\n'
-        'modprobe snd-seq-oss\n')
-f.close()
-os.system('chmod +x /etc/rc.modules')
+%post
+echo "OS install is completed" > /dev/ttyS0
+grubby --remove-args="rhgb quiet" --update-kernel=$(grubby --default-kernel)
+dhclient
+chkconfig sshd on
+iptables -F
+echo 0 > /selinux/enforce
+chkconfig NetworkManager on
+sed -i "/^HWADDR/d" /etc/sysconfig/network-scripts/ifcfg-eth0
+echo 'Post set up finished' > /dev/ttyS0
+echo Post set up finished > /dev/hvc0
+cat > '/etc/gdm/custom.conf' << EOF
+[daemon]
+AutomaticLogin=test
+AutomaticLoginEnable=True
+EOF
+cat >> '/etc/sudoers' << EOF
+test ALL = NOPASSWD: /sbin/shutdown -r now,/sbin/shutdown -h now
+EOF
+cat >> '/home/test/.bashrc' << EOF
+alias shutdown='sudo shutdown'
+EOF
+cat >> '/etc/rc.modules' << EOF
+modprobe snd-aloop
+modprobe snd-pcm-oss
+modprobe snd-mixer-oss
+modprobe snd-seq-oss
+EOF
+chmod +x /etc/rc.modules
 %end

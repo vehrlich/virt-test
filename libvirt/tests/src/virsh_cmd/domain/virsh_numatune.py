@@ -1,7 +1,13 @@
-import re, logging
+import re
+import logging
+from virttest.utils_test.libvirt import cpus_parser
 from autotest.client.shared import error, utils
-from virttest import libvirt_vm, libvirt_xml, virsh
-from virttest import utils_cgroup
+from virttest import libvirt_xml, virsh, utils_libvirtd
+try:
+    from virttest.staging import utils_cgroup
+except ImportError:
+    # TODO: Obsoleted path used prior autotest-0.15.2/virttest-2013.06.24
+    from autotest.client.shared import utils_cgroup
 
 
 def num_numa_nodes():
@@ -16,57 +22,10 @@ def num_numa_nodes():
         return 0
 
 
-def nodeset_parser(nodeset):
-    """
-    Parse a list of numa nodes, its syntax is a comma separated list,
-    with '-' for ranges and '^' for excluding a node.
-    @param nodeset: NUMA node selections to set
-    """
-    hyphens = []
-    carets = []
-    commas = []
-    others = []
-
-    if nodeset is None:
-        return None
-
-    else:
-        if "," in nodeset:
-            nodeset_list = re.split(",", nodeset)
-            for nodeset in nodeset_list:
-                if "-" in nodeset:
-                    tmp = re.split("-", nodeset)
-                    hyphens = hyphens + range(int(tmp[0]), int(tmp[-1])+1)
-                elif "^" in nodeset:
-                    tmp = re.split(r"\^", nodeset)[-1]
-                    carets.append(int(tmp))
-                else:
-                    try:
-                        commas.append(int(nodeset))
-                    except ValueError:
-                        logging.error("The nodeset has to be an "
-                                      "integer. (%s)", nodeset)
-        elif "-" in nodeset:
-            tmp = re.split("-", nodeset)
-            hyphens = range(int(tmp[0]), int(tmp[-1])+1)
-        elif "^" in nodeset:
-            tmp = re.split("^", nodeset)[-1]
-            carets.append(int(tmp))
-        else:
-            try:
-                others.append(int(nodeset))
-                return others
-            except ValueError:
-                logging.error("The nodeset has to be an "
-                              "integer. (%s)", nodeset)
-
-        return list(set(hyphens).union(set(commas)).difference(set(carets)))
-
-
 def check_numatune_xml(params):
     """
     Compare mode and nodeset value with guest XML configuration
-    @params: the parameter dictionary
+    :params: the parameter dictionary
     """
     vm_name = params.get("vms")
     mode = params.get("numa_mode", "")
@@ -75,8 +34,8 @@ def check_numatune_xml(params):
     #--config option will act after vm shutdown.
     if options == "config":
         virsh.shutdown(vm_name)
-    #The verification of the numa params should
-    #be done when vm is running.
+    # The verification of the numa params should
+    # be done when vm is running.
     if not virsh.is_alive(vm_name):
         virsh.start(vm_name)
 
@@ -86,7 +45,7 @@ def check_numatune_xml(params):
         return False
 
     mode_from_xml = numa_params['mode']
-    #if the placement is auto, there is no nodeset in numa param.
+    # if the placement is auto, there is no nodeset in numa param.
     try:
         nodeset_from_xml = numa_params['nodeset']
     except KeyError():
@@ -99,8 +58,8 @@ def check_numatune_xml(params):
     # The actual nodeset value is different with guest XML configuration,
     # so need to compare them via a middle result, for example, if you
     # set nodeset is '0,1,2' then it will be a list '0-2' in guest XML
-    nodeset = nodeset_parser(nodeset)
-    nodeset_from_xml = nodeset_parser(nodeset_from_xml)
+    nodeset = cpus_parser(nodeset)
+    nodeset_from_xml = cpus_parser(nodeset_from_xml)
 
     if nodeset and nodeset != nodeset_from_xml:
         logging.error("To expect %s: %s", nodeset, nodeset_from_xml)
@@ -112,7 +71,7 @@ def check_numatune_xml(params):
 def get_numa_parameter(params):
     """
     Get the numa parameters
-    @params: the parameter dictionary
+    :params: the parameter dictionary
     """
     vm_name = params.get("vms")
     options = params.get("options", None)
@@ -137,7 +96,7 @@ def get_numa_parameter(params):
 def set_numa_parameter(params):
     """
     Set the numa parameters
-    @params: the parameter dictionary
+    :params: the parameter dictionary
     """
     vm_name = params.get("vms")
     mode = params.get("numa_mode")
@@ -173,8 +132,9 @@ def set_numa_parameter(params):
             raise error.TestFail("Unexpected return code %d" % status)
     elif status_error == "no":
         if status:
-            if len(nodeset_parser(nodeset)) > num_numa_nodes():
-                raise error.TestNAError("Host does not support requested nodeset")
+            if len(cpus_parser(nodeset)) > num_numa_nodes():
+                raise error.TestNAError("Host does not support requested"
+                                        " nodeset")
             else:
                 raise error.TestFail(result.stderr)
         else:
@@ -211,6 +171,7 @@ def run_virsh_numatune(test, params, env):
     vm_name = params.get("vms")
     vm = env.get_vm(vm_name)
     original_vm_xml = libvirt_xml.VMXML.new_from_dumpxml(vm_name)
+    cgconfig_service = utils_cgroup.CgconfigService()
     status_error = params.get("status_error", "no")
     libvirtd = params.get("libvirtd", "on")
     cgconfig = params.get("cgconfig", "on")
@@ -221,7 +182,7 @@ def run_virsh_numatune(test, params, env):
     if start_vm == "no" and vm.is_alive():
         vm.destroy()
 
-    ########## positive and negative testing #########
+    # positive and negative testing #########
 
     try:
         if status_error == "no":
@@ -234,14 +195,14 @@ def run_virsh_numatune(test, params, env):
             # and will start the guest after restarting libvirtd service
             if vm.is_alive():
                 vm.destroy()
-            if utils_cgroup.service_cgconfig_control("status"):
-                utils_cgroup.service_cgconfig_control("stop")
+            if cgconfig_service.cgconfig_is_running():
+                cgconfig_service.cgconfig_stop()
         # Refresh libvirtd service to get latest cgconfig service change
         if libvirtd == "restart":
-            libvirt_vm.service_libvirtd_control("restart")
+            utils_libvirtd.libvirtd_restart()
         # Recover previous running guest
-        if cgconfig == "off" and libvirtd == "restart" \
-            and not vm.is_alive() and start_vm == "yes":
+        if (cgconfig == "off" and libvirtd == "restart"
+                and not vm.is_alive() and start_vm == "yes"):
             vm.start()
         if status_error == "yes":
             if change_parameters == "no":
@@ -249,9 +210,9 @@ def run_virsh_numatune(test, params, env):
             else:
                 set_numa_parameter(params)
         # Recover cgconfig and libvirtd service
-        if not utils_cgroup.service_cgconfig_control("status"):
-            utils_cgroup.service_cgconfig_control("start")
-            libvirt_vm.service_libvirtd_control("restart")
+        if not cgconfig_service.cgconfig_is_running():
+            cgconfig_service.cgconfig_start()
+            utils_libvirtd.libvirtd_restart()
     finally:
         vm.destroy()
         # Restore guest, first remove existing

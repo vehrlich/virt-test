@@ -1,6 +1,8 @@
-import os, logging
+import os
+import logging
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh, remote
+from virttest import libvirt_vm, virsh, remote, utils_libvirtd, aexpect
+
 
 def run_virsh_undefine(test, params, env):
     """
@@ -8,7 +10,7 @@ def run_virsh_undefine(test, params, env):
 
     Undefine an inactive domain, or convert persistent to transient.
     1.Prepare test environment.
-    2.Backup the VM's infomation to a xml file.
+    2.Backup the VM's information to a xml file.
     3.When the libvirtd == "off", stop the libvirtd service.
     4.Perform virsh undefine operation.
     5.Recover test environment.(libvirts service,VM)
@@ -49,41 +51,40 @@ def run_virsh_undefine(test, params, env):
 
     # Turn libvirtd into certain state.
     if libvirtd_state == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     # Test virsh undefine command.
-    status = 0
-    try:
-        uri = libvirt_vm.complete_uri(local_ip)
-    except error.CmdError:
-        status = 1
-        uri = None
     if vm_ref != "remote":
-        vm_ref = "%s %s"% (vm_ref, extra)
-        cmdresult = virsh.undefine(vm_ref, uri=uri,
+        vm_ref = "%s %s" % (vm_ref, extra)
+        cmdresult = virsh.undefine(vm_ref,
                                    ignore_status=True, debug=True)
         status = cmdresult.exit_status
         if status:
             logging.debug("Error status, command output: %s", cmdresult.stdout)
         if undefine_twice == "yes":
-            status2 = virsh.undefine(vm_ref, uri=uri,
+            status2 = virsh.undefine(vm_ref,
                                      ignore_status=True).exit_status
     else:
         if remote_ip.count("EXAMPLE.COM") or local_ip.count("EXAMPLE.COM"):
             raise error.TestNAError("remote_ip and/or local_ip parameters not"
                                     " changed from default values")
-        session = remote.remote_login("ssh", remote_ip, "22", remote_user,
-                                      remote_password, remote_prompt)
-        cmd_undefine = "virsh -c %s undefine %s" % (uri, vm_name)
-        status, output = session.cmd_status_output(cmd_undefine)
-        logging.info("Undefine output: %s", output)
+        try:
+            uri = libvirt_vm.complete_uri(local_ip)
+            session = remote.remote_login("ssh", remote_ip, "22", remote_user,
+                                          remote_password, remote_prompt)
+            cmd_undefine = "virsh -c %s undefine %s" % (uri, vm_name)
+            status, output = session.cmd_status_output(cmd_undefine)
+            logging.info("Undefine output: %s", output)
+        except (error.CmdError, remote.LoginError, aexpect.ShellError), detail:
+            logging.error("Detail: %s", detail)
+            status = 1
 
     # Recover libvirtd state.
     if libvirtd_state == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
     # Shutdown VM.
-    if virsh.domain_exists(vm.name, uri=uri):
+    if virsh.domain_exists(vm.name):
         try:
             if vm.is_alive():
                 vm.destroy()
@@ -91,18 +92,18 @@ def run_virsh_undefine(test, params, env):
             logging.error("Detail: %s", detail)
 
     # Check if VM exists.
-    vm_exist = virsh.domain_exists(vm.name, uri=uri)
+    vm_exist = virsh.domain_exists(vm.name)
 
     # Check if xml file exists.
     xml_exist = False
     if (os.path.exists("/etc/libvirt/qemu/%s.xml" % vm_name) or
-        os.path.exists("/etc/xen/%s" % vm_name)):
+            os.path.exists("/etc/xen/%s" % vm_name)):
         xml_exist = True
 
     # Recover main VM.
-    if not virsh.domain_exists(vm.name, uri=uri):
+    if not virsh.domain_exists(vm.name):
         s_define = virsh.define(xml_file)
-        if s_define != True or not virsh.domain_exists(vm.name, uri=uri):
+        if s_define is not True or not virsh.domain_exists(vm.name):
             logging.error("Failed to define %s.", vm.name)
 
     # Check results.

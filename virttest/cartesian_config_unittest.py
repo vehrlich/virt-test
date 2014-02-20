@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-import unittest, os
+import unittest
+import os
 import gzip
 import cartesian_config
 
@@ -10,6 +11,7 @@ testdatadir = os.path.join(mydir, 'unittest_data')
 
 
 class CartesianConfigTest(unittest.TestCase):
+
     def _checkDictionaries(self, parser, reference):
         result = list(parser.get_dicts())
         # as the dictionary list is very large, test each item individually:
@@ -35,19 +37,16 @@ class CartesianConfigTest(unittest.TestCase):
         p = cartesian_config.Parser(configpath)
         self._checkDictionaries(p, dumpdata)
 
-
     def _checkStringConfig(self, string, reference):
         p = cartesian_config.Parser()
         p.parse_string(string)
         self._checkDictionaries(p, reference)
-
 
     def _checkStringDump(self, string, dump, defaults=False):
         p = cartesian_config.Parser(defaults=defaults)
         p.parse_string(string)
 
         self._checkDictionaries(p, dump)
-
 
     def testSimpleVariant(self):
         self._checkStringConfig("""
@@ -58,8 +57,22 @@ class CartesianConfigTest(unittest.TestCase):
                 - b:
                     x = vb
             """,
-            [dict(name='a', shortname='a', dep=[], x='va', c='abc'),
-             dict(name='b', shortname='b', dep=[], x='vb', c='abc')])
+            [
+                {'_name_map_file': {'<string>': 'a'},
+                 '_short_name_map_file': {'<string>': 'a'},
+                 'c': 'abc',
+                 'dep': [],
+                 'name': 'a',
+                 'shortname': 'a',
+                 'x': 'va'},
+                {'_name_map_file': {'<string>': 'b'},
+                 '_short_name_map_file': {'<string>': 'b'},
+                 'c': 'abc',
+                 'dep': [],
+                 'name': 'b',
+                 'shortname': 'b',
+                 'x': 'vb'},
+            ])
 
 
     def testFilterMixing(self):
@@ -78,17 +91,22 @@ class CartesianConfigTest(unittest.TestCase):
                 - testB:
             """,
             [
-                {'dep': [],
+                {'_name_map_file': {'<string>': 'testA.kvm.unknown_qemu'},
+                 '_short_name_map_file': {'<string>': 'testA.kvm.unknown_qemu'},
+                 'dep': [],
                  'name': 'testA.kvm.unknown_qemu',
                  'shortname': 'testA.kvm.unknown_qemu'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': 'testB.kvm.unknown_qemu'},
+                 '_short_name_map_file': {'<string>': 'testB.kvm.unknown_qemu'},
+                 'dep': [],
                  'name': 'testB.kvm.unknown_qemu',
                  'shortname': 'testB.kvm.unknown_qemu'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': 'testB.nokvm.unknown_qemu'},
+                 '_short_name_map_file': {'<string>': 'testB.nokvm.unknown_qemu'},
+                 'dep': [],
                  'name': 'testB.nokvm.unknown_qemu',
                  'shortname': 'testB.nokvm.unknown_qemu'},
-            ]
-            )
+            ])
 
 
     def testNameVariant(self):
@@ -117,56 +135,68 @@ class CartesianConfigTest(unittest.TestCase):
             only (host_os=linux)
             """,
             [
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=linux).(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'linux.linux.wait.long'},
+                 'dep': [],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=linux).(tests=wait).long',
                  'run': 'wait',
-                 'shortname': '(host_os=linux).(tests=wait).long',
+                 'shortname': 'linux.wait.long',
                  'tests': 'wait',
                  'time': 'short_time',
                  'virt_system': 'linux'},
-                {'dep': ['(host_os=linux).(virt_system=linux).(tests=wait).long'],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=linux).(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'linux.linux.wait.short'},
+                 'dep': ['(host_os=linux).(virt_system=linux).(tests=wait).long'],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=linux).(tests=wait).short',
                  'run': 'wait',
-                 'shortname': '(host_os=linux).(tests=wait).short',
+                 'shortname': 'linux.wait.short',
                  'tests': 'wait',
                  'time': 'logn_time',
                  'virt_system': 'linux'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=linux).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'linux.linux.test2'},
+                 'dep': [],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=linux).(tests=test2)',
                  'run': 'test1',
-                 'shortname': '(host_os=linux).(tests=test2)',
+                 'shortname': 'linux.test2',
                  'tests': 'test2',
                  'virt_system': 'linux'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=windows).(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'linux.windows.wait.long'},
+                 'dep': [],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=windows).(tests=wait).long',
                  'run': 'wait',
-                 'shortname': '(host_os=linux).(virt_system=windows).(tests=wait).long',
+                 'shortname': 'linux.windows.wait.long',
                  'tests': 'wait',
                  'time': 'short_time',
                  'virt_system': 'windows'},
-                {'dep': ['(host_os=linux).(virt_system=windows).(tests=wait).long'],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=windows).(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'linux.windows.wait.short'},
+                 'dep': ['(host_os=linux).(virt_system=windows).(tests=wait).long'],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=windows).(tests=wait).short',
                  'run': 'wait',
-                 'shortname': '(host_os=linux).(virt_system=windows).(tests=wait).short',
+                 'shortname': 'linux.windows.wait.short',
                  'tests': 'wait',
                  'time': 'logn_time',
                  'virt_system': 'windows'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=linux).(virt_system=windows).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'linux.windows.test2'},
+                 'dep': [],
                  'host_os': 'linux',
                  'image': 'linux',
                  'name': '(host_os=linux).(virt_system=windows).(tests=test2)',
                  'run': 'test1',
-                 'shortname': '(host_os=linux).(virt_system=windows).(tests=test2)',
+                 'shortname': 'linux.windows.test2',
                  'tests': 'test2',
                  'virt_system': 'windows'},
             ]
@@ -197,43 +227,48 @@ class CartesianConfigTest(unittest.TestCase):
                    image = windows
             """,
             [
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=windows).(virt_system=linux).(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'windows.linux.wait.long'},
+                 'dep': [],
                  'host_os': 'windows',
                  'image': 'windows',
                  'name': '(host_os=windows).(virt_system=linux).(tests=wait).long',
                  'run': 'wait',
-                 'shortname': '(tests=wait).long',
+                 'shortname': 'wait.long',
                  'tests': 'wait',
                  'time': 'short_time',
                  'virt_system': 'linux'},
-                {'dep': ['(host_os=windows).(virt_system=linux).(tests=wait).long'],
+                {'_name_map_file': {'<string>': '(host_os=windows).(virt_system=linux).(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'windows.linux.wait.short'},
+                 'dep': ['(host_os=windows).(virt_system=linux).(tests=wait).long'],
                  'host_os': 'windows',
                  'image': 'windows',
                  'name': '(host_os=windows).(virt_system=linux).(tests=wait).short',
                  'run': 'wait',
-                 'shortname': '(tests=wait).short',
+                 'shortname': 'wait.short',
                  'tests': 'wait',
                  'time': 'logn_time',
                  'virt_system': 'linux'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(host_os=windows).(virt_system=linux).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'windows.linux.test2'},
+                 'dep': [],
                  'host_os': 'windows',
                  'image': 'windows',
                  'name': '(host_os=windows).(virt_system=linux).(tests=test2)',
                  'run': 'test1',
-                 'shortname': '(tests=test2)',
+                 'shortname': 'test2',
                  'tests': 'test2',
                  'virt_system': 'linux'},
             ],
             True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants tests [default=system2]:
                   - system1:
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
     def testDel(self):
         self._checkStringDump("""
@@ -249,22 +284,28 @@ class CartesianConfigTest(unittest.TestCase):
                    run = "test1"
             """,
             [
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'wait.long'},
+                 'dep': [],
                  'name': '(tests=wait).long',
                  'run': 'wait',
-                 'shortname': '(tests=wait).long',
+                 'shortname': 'wait.long',
                  'tests': 'wait',
                  'time': 'short_time'},
-                {'dep': ['(tests=wait).long'],
+                {'_name_map_file': {'<string>': '(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'wait.short'},
+                 'dep': ['(tests=wait).long'],
                  'name': '(tests=wait).short',
                  'run': 'wait',
-                 'shortname': '(tests=wait).short',
+                 'shortname': 'wait.short',
                  'tests': 'wait',
                  'time': 'logn_time'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'test2'},
+                 'dep': [],
                  'name': '(tests=test2)',
                  'run': 'test1',
-                 'shortname': '(tests=test2)',
+                 'shortname': 'test2',
                  'tests': 'test2'},
             ],
             True)
@@ -284,20 +325,26 @@ class CartesianConfigTest(unittest.TestCase):
             del time
             """,
             [
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'wait.long'},
+                 'dep': [],
                  'name': '(tests=wait).long',
                  'run': 'wait',
-                 'shortname': '(tests=wait).long',
+                 'shortname': 'wait.long',
                  'tests': 'wait'},
-                {'dep': ['(tests=wait).long'],
+                {'_name_map_file': {'<string>': '(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'wait.short'},
+                 'dep': ['(tests=wait).long'],
                  'name': '(tests=wait).short',
                  'run': 'wait',
-                 'shortname': '(tests=wait).short',
+                 'shortname': 'wait.short',
                  'tests': 'wait'},
-                {'dep': [],
+                {'_name_map_file': {'<string>': '(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'test2'},
+                 'dep': [],
                  'name': '(tests=test2)',
                  'run': 'test1',
-                 'shortname': '(tests=test2)',
+                 'shortname': 'test2',
                  'tests': 'test2'},
             ],
             True)
@@ -305,7 +352,7 @@ class CartesianConfigTest(unittest.TestCase):
 
     def testError1(self):
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants tests:
                   wait:
                        run = "wait"
@@ -317,18 +364,16 @@ class CartesianConfigTest(unittest.TestCase):
                   - test2:
                        run = "test1"
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
     def testMissingInclude(self):
         self.assertRaises(cartesian_config.MissingIncludeError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 include xxxxxxxxx/xxxxxxxxxxx
                 """,
-            [],
-            True)
-
+                          [],
+                          True)
 
     def testVariableAssignment(self):
         self._checkStringDump("""
@@ -339,19 +384,25 @@ class CartesianConfigTest(unittest.TestCase):
                     var += a
                     var <= b
                     system = 2
-                    s.* ?= ${tests}4
+                    ddd = ${tests + str(int(system) + 3)}4
+                    error = ${tests + str(system + 3)}4
+                    s.* ?= ${tests + "ahoj"}4
                     s.* ?+= c
                     s.* ?<= d
                     system += 4
                     var += "test"
             """,
             [
-            {'dep': [],
-             'name': '(tests=system1)',
-             'shortname': '(tests=system1)',
-             'system': 'dsystem14c4',
-             'tests': 'system1',
-             'var': 'b2atest'},
+                {'_name_map_file': {'<string>': '(tests=system1)'},
+                 '_short_name_map_file': {'<string>': 'system1'},
+                 'ddd': 'system154',
+                 'dep': [],
+                 'error': '${tests + str(system + 3)}4',
+                 'name': '(tests=system1)',
+                 'shortname': 'system1',
+                 'system': 'dsystem1ahoj4c4',
+                 'tests': 'system1',
+                 'var': 'b2atest'},
             ],
             True)
 
@@ -373,25 +424,31 @@ class CartesianConfigTest(unittest.TestCase):
                aaa = 1
             """,
             [
-            {'dep': [],
-             'name': '(tests=wait).long',
-             'run': 'wait',
-             'shortname': '(tests=wait).long',
-             'tests': 'wait',
-             'time': 'short_time'},
-            {'dep': ['(tests=wait).long'],
-             'name': '(tests=wait).short',
-             'run': 'wait',
-             'shortname': '(tests=wait).short',
-             'tests': 'wait',
-             'time': 'logn_time'},
-            {'aaa': '1',
-             'bbb': 'aaaa',
-             'dep': [],
-             'name': '(tests=test2)',
-             'run': 'test1',
-             'shortname': '(tests=test2)',
-             'tests': 'test2'},
+                {'_name_map_file': {'<string>': '(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'wait.long'},
+                 'dep': [],
+                 'name': '(tests=wait).long',
+                 'run': 'wait',
+                 'shortname': 'wait.long',
+                 'tests': 'wait',
+                 'time': 'short_time'},
+                {'_name_map_file': {'<string>': '(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'wait.short'},
+                 'dep': ['(tests=wait).long'],
+                 'name': '(tests=wait).short',
+                 'run': 'wait',
+                 'shortname': 'wait.short',
+                 'tests': 'wait',
+                 'time': 'logn_time'},
+                {'_name_map_file': {'<string>': '(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'test2'},
+                 'aaa': '1',
+                 'bbb': 'aaaa',
+                 'dep': [],
+                 'name': '(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'test2',
+                 'tests': 'test2'},
             ],
             True)
         self._checkStringDump("""
@@ -410,18 +467,32 @@ class CartesianConfigTest(unittest.TestCase):
                 - d:
             """,
             [
-                {'bala': 'balabala',
+                {'_name_map_file': {'<string>': 'c.a'},
+                 '_short_name_map_file': {'<string>': 'c.a'},
+                 'bala': 'balabala',
                  'dep': [],
                  'foo': 'bar',
                  'name': 'c.a',
                  'shortname': 'c.a'},
-                {'bala': 'lalalala',
+                {'_name_map_file': {'<string>': 'c.b'},
+                 '_short_name_map_file': {'<string>': 'c.b'},
+                 'bala': 'lalalala',
                  'dep': [],
                  'foo': 'foob',
                  'name': 'c.b',
                  'shortname': 'c.b'},
-                {'dep': [], 'foo': 'foo', 'name': 'd.a', 'shortname': 'd.a'},
-                {'dep': [], 'foo': 'foob', 'name': 'd.b', 'shortname': 'd.b'},
+                {'_name_map_file': {'<string>': 'd.a'},
+                 '_short_name_map_file': {'<string>': 'd.a'},
+                 'dep': [],
+                 'foo': 'foo',
+                 'name': 'd.a',
+                 'shortname': 'd.a'},
+                {'_name_map_file': {'<string>': 'd.b'},
+                 '_short_name_map_file': {'<string>': 'd.b'},
+                 'dep': [],
+                 'foo': 'foob',
+                 'name': 'd.b',
+                 'shortname': 'd.b'},
             ],
             True)
 
@@ -443,34 +514,40 @@ class CartesianConfigTest(unittest.TestCase):
                aaa = 1
             """,
             [
-            {'aaa': '1',
-             'bbb': 'aaaa',
-             'dep': [],
-             'name': '(tests=wait).long',
-             'run': 'wait',
-             'shortname': '(tests=wait).long',
-             'tests': 'wait',
-             'time': 'short_time'},
-            {'aaa': '1',
-             'bbb': 'aaaa',
-             'dep': ['(tests=wait).long'],
-             'name': '(tests=wait).short',
-             'run': 'wait',
-             'shortname': '(tests=wait).short',
-             'tests': 'wait',
-             'time': 'logn_time'},
-            {'dep': [],
-             'name': '(tests=test2)',
-             'run': 'test1',
-             'shortname': '(tests=test2)',
-             'tests': 'test2'},
+                {'_name_map_file': {'<string>': '(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'wait.long'},
+                 'aaa': '1',
+                 'bbb': 'aaaa',
+                 'dep': [],
+                 'name': '(tests=wait).long',
+                 'run': 'wait',
+                 'shortname': 'wait.long',
+                 'tests': 'wait',
+                 'time': 'short_time'},
+                {'_name_map_file': {'<string>': '(tests=wait).short'},
+                 '_short_name_map_file': {'<string>': 'wait.short'},
+                 'aaa': '1',
+                 'bbb': 'aaaa',
+                 'dep': ['(tests=wait).long'],
+                 'name': '(tests=wait).short',
+                 'run': 'wait',
+                 'shortname': 'wait.short',
+                 'tests': 'wait',
+                 'time': 'logn_time'},
+                {'_name_map_file': {'<string>': '(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'test2'},
+                 'dep': [],
+                 'name': '(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'test2',
+                 'tests': 'test2'},
             ],
             True)
 
 
     def testSyntaxErrors(self):
         self.assertRaises(cartesian_config.LexerError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants tests$:
                   - system1:
                         var = 1
@@ -483,92 +560,85 @@ class CartesianConfigTest(unittest.TestCase):
                         s.* ?<= d
                         system += 4
                 """,
-                [],
-                True)
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.LexerError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants tests [defaul$$$$t=system1]:
                   - system1:
                 """,
-                [],
-                True)
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants tests [default=system1] wrong:
                   - system1:
                 """,
-                [],
-                True)
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 only xxx...yyy
                 """,
-                [],
-                True)
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 only xxx..,yyy
                 """,
-                [],
-                True)
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 aaabbbb.ddd
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 aaa.bbb:
                   variants test:
                      -sss:
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants test [sss = bbb:
                      -sss:
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants test [default]:
                      -sss:
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants test [default] ddd:
                      -sss:
                 """,
-                [],
-                True)
-
+                          [],
+                          True)
 
         self.assertRaises(cartesian_config.ParserError,
-            self._checkStringDump, """
+                          self._checkStringDump, """
                 variants test [default] ddd
                 """,
-                [],
-                True)
-
-
+                          [],
+                          True)
 
     def testComplicatedFilter(self):
         self._checkStringDump("""
@@ -600,54 +670,64 @@ class CartesianConfigTest(unittest.TestCase):
                     only test2
             """,
             [
-             {'dep': [],
-             'guest_os': 'linux',
-             'host_os': 'linux',
-             'install': 'linux',
-             'name': '(host_os=linux).(guest_os=linux).(tests=wait).long',
-             'run': 'wait',
-             'shortname': '(host_os=linux).(guest_os=linux).(tests=wait).long',
-             'start': 'linux',
-             'tests': 'wait',
-             'time': 'short_time'},
-            {'dep': [],
-             'guest_os': 'linux',
-             'host_os': 'linux',
-             'install': 'linux',
-             'name': '(host_os=linux).(guest_os=linux).(tests=test2)',
-             'run': 'test1',
-             'shortname': '(host_os=linux).(guest_os=linux).(tests=test2)',
-             'start': 'linux',
-             'tests': 'test2'},
-            {'dep': [],
-             'guest_os': 'windows',
-             'host_os': 'linux',
-             'install': 'windows',
-             'name': '(host_os=linux).(guest_os=windows).(tests=test2)',
-             'run': 'test1',
-             'shortname': '(host_os=linux).(guest_os=windows).(tests=test2)',
-             'start': 'linux',
-             'tests': 'test2'},
-            {'dep': [],
-             'guest_os': 'linux',
-             'host_os': 'windows',
-             'install': 'linux',
-             'name': '(host_os=windows).(guest_os=linux).(tests=test2)',
-             'run': 'test1',
-             'shortname': '(host_os=windows).(guest_os=linux).(tests=test2)',
-             'start': 'windows',
-             'tests': 'test2'},
-            {'dep': [],
-             'guest_os': 'windows',
-             'host_os': 'windows',
-             'install': 'windows',
-             'name': '(host_os=windows).(guest_os=windows).(tests=test2)',
-             'run': 'test1',
-             'shortname': '(host_os=windows).(guest_os=windows).(tests=test2)',
-             'start': 'windows',
-             'tests': 'test2'},
-             ],
-             True)
+                {'_name_map_file': {'<string>': '(host_os=linux).(guest_os=linux).(tests=wait).long'},
+                 '_short_name_map_file': {'<string>': 'linux.linux.wait.long'},
+                 'dep': [],
+                 'guest_os': 'linux',
+                 'host_os': 'linux',
+                 'install': 'linux',
+                 'name': '(host_os=linux).(guest_os=linux).(tests=wait).long',
+                 'run': 'wait',
+                 'shortname': 'linux.linux.wait.long',
+                 'start': 'linux',
+                 'tests': 'wait',
+                 'time': 'short_time'},
+                {'_name_map_file': {'<string>': '(host_os=linux).(guest_os=linux).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'linux.linux.test2'},
+                 'dep': [],
+                 'guest_os': 'linux',
+                 'host_os': 'linux',
+                 'install': 'linux',
+                 'name': '(host_os=linux).(guest_os=linux).(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'linux.linux.test2',
+                 'start': 'linux',
+                 'tests': 'test2'},
+                {'_name_map_file': {'<string>': '(host_os=linux).(guest_os=windows).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'linux.windows.test2'},
+                 'dep': [],
+                 'guest_os': 'windows',
+                 'host_os': 'linux',
+                 'install': 'windows',
+                 'name': '(host_os=linux).(guest_os=windows).(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'linux.windows.test2',
+                 'start': 'linux',
+                 'tests': 'test2'},
+                {'_name_map_file': {'<string>': '(host_os=windows).(guest_os=linux).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'windows.linux.test2'},
+                 'dep': [],
+                 'guest_os': 'linux',
+                 'host_os': 'windows',
+                 'install': 'linux',
+                 'name': '(host_os=windows).(guest_os=linux).(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'windows.linux.test2',
+                 'start': 'windows',
+                 'tests': 'test2'},
+                {'_name_map_file': {'<string>': '(host_os=windows).(guest_os=windows).(tests=test2)'},
+                 '_short_name_map_file': {'<string>': 'windows.windows.test2'},
+                 'dep': [],
+                 'guest_os': 'windows',
+                 'host_os': 'windows',
+                 'install': 'windows',
+                 'name': '(host_os=windows).(guest_os=windows).(tests=test2)',
+                 'run': 'test1',
+                 'shortname': 'windows.windows.test2',
+                 'start': 'windows',
+                 'tests': 'test2'},
+            ],
+            True)
 
         f = "only xxx.yyy..(xxx=333).aaa, ddd (eeee) rrr.aaa"
 
@@ -668,7 +748,6 @@ class CartesianConfigTest(unittest.TestCase):
                            [[cartesian_config.Label("rrr"),
                              cartesian_config.Label("aaa")]]],
                           "Failed to parse filter.")
-
 
     def testHugeTest1(self):
         self._checkConfigDump('testcfg.huge/test1.cfg',

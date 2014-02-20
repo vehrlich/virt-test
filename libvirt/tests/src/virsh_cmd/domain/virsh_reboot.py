@@ -1,6 +1,8 @@
-import re, logging
+import re
+import logging
 from autotest.client.shared import error
-from virttest import libvirt_vm, virsh, remote
+from virttest import libvirt_vm, virsh, remote, utils_libvirtd
+
 
 def run_virsh_reboot(test, params, env):
     """
@@ -17,7 +19,7 @@ def run_virsh_reboot(test, params, env):
     vm_name = params.get("main_vm")
     vm = env.get_vm(vm_name)
 
-    #run test case
+    # run test case
     libvirtd = params.get("libvirtd", "on")
     vm_ref = params.get("reboot_vm_ref")
     status_error = params.get("status_error")
@@ -28,13 +30,13 @@ def run_virsh_reboot(test, params, env):
     domid = vm.get_id()
     domuuid = vm.get_uuid()
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     if vm_ref == "id":
         vm_ref = domid
     elif vm_ref == "name":
-        vm_ref =  vm_name
-    elif  vm_ref == "uuid":
+        vm_ref = vm_name
+    elif vm_ref == "uuid":
         vm_ref = domuuid
     elif vm_ref == "hex_id":
         vm_ref = hex(int(domid))
@@ -68,16 +70,17 @@ def run_virsh_reboot(test, params, env):
                 status = -2
     output = virsh.dom_list(ignore_status=True).stdout.strip()
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0:
             raise error.TestFail("Run successfully with wrong command!")
     elif status_error == "no":
         if status != 0 or (not re.search(vm_name, output)):
             if status == -2:
-                raise error.TestNAError("Reboot command doesn't work on older libvirt versions")
+                raise error.TestNAError(
+                    "Reboot command doesn't work on older libvirt versions")
             raise error.TestFail("Run failed with right command")

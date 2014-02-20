@@ -1,7 +1,9 @@
-import os, logging
+import os
+import logging
 from autotest.client.shared import error
 from virttest import aexpect, virt_vm, virsh, remote
 from virttest.libvirt_xml import vm_xml
+
 
 def run_virsh_attach_detach_disk(test, params, env):
     """
@@ -18,7 +20,7 @@ def run_virsh_attach_detach_disk(test, params, env):
         """
         Create a device source file.
 
-        @param: device_source: Device source file.
+        :param device_source: Device source file.
         """
         try:
             f = open(device_source, 'wb')
@@ -32,10 +34,10 @@ def run_virsh_attach_detach_disk(test, params, env):
         """
         Check VM disk's partition.
 
-        @param: vm. VM guest.
-        @param: os_type. VM's operation system type.
-        @param: target_name. Device target type.
-        @return: True if check successfully.
+        :param vm. VM guest.
+        :param os_type. VM's operation system type.
+        :param target_name. Device target type.
+        :return: True if check successfully.
         """
         logging.info("Checking VM partittion...")
         if vm.is_dead():
@@ -45,11 +47,11 @@ def run_virsh_attach_detach_disk(test, params, env):
                 session = vm.wait_for_login()
                 if device == "disk":
                     s, o = session.cmd_status_output(
-                    "grep %s /proc/partitions" % target_name)
+                        "grep %s /proc/partitions" % target_name)
                     logging.info("Virtio devices in VM:\n%s", o)
                 elif device == "cdrom":
                     s, o = session.cmd_status_output(
-                    "ls /dev/cdrom")
+                        "ls /dev/cdrom")
                     logging.info("CDROM in VM:\n%s", o)
                 session.close()
                 if s != 0:
@@ -63,23 +65,31 @@ def run_virsh_attach_detach_disk(test, params, env):
         """
         Add acpiphp module if VM's os type is rhle5.*
 
-        @param: vm. VM guest.
-        @param: os_type. VM's operation system type.
-        @return: True if operate successfully.
+        :param vm. VM guest.
+        :param os_type. VM's operation system type.
+        :return: True if operate successfully.
         """
         if vm.is_dead():
             vm.start()
         try:
             if os_type == "linux":
                 session = vm.wait_for_login()
+                s_rpm, o_rpm = session.cmd_status_output(
+                    "rpm --version")
+                # If status is different from 0, this
+                # guest OS doesn't support the rpm package
+                # manager
+                if s_rpm:
+                    session.close()
+                    return True
                 s_vd, o_vd = session.cmd_status_output(
-                            "rpm -qa | grep redhat-release")
-                if s_vd != 0:
+                    "rpm -qa | grep redhat-release")
+                if s_vd != 0 and o_vd != "":
                     session.close()
                     return False
                 if o_vd.find("5Server") != -1:
                     s_mod, o_mod = session.cmd_status_output(
-                                              "modprobe acpiphp")
+                        "modprobe acpiphp")
                     del o_mod
                     if s_mod != 0:
                         session.close()
@@ -121,35 +131,43 @@ def run_virsh_attach_detach_disk(test, params, env):
         device_source = device_source_name
     virsh.dumpxml(vm_name, extra="", to_file=vm_xml_file)
 
-    vm.start()
-    vm.wait_for_login()
-
     # Create virtual device file.
     create_device_file(device_source)
 
-    # Add acpiphp module before testing if VM's os type is rhle5.*
-    if not acpiphp_module_modprobe(vm, os_type):
-        raise error.TestError("Add acpiphp module failed before test.")
+    if vm.is_alive():
+        vm.destroy(gracefully=False)
 
     # If we are testing cdrom device, we need to detach hdc in VM first.
     if device == "cdrom":
         if vm.is_alive():
             vm.destroy(gracefully=False)
-        s_detach = virsh.detach_disk(vm_name, device_target,  "--config")
+        s_detach = virsh.detach_disk(vm_name, device_target, "--config")
         if not s_detach:
             logging.error("Detach hdc failed before test.")
-        vm.start()
 
     # If we are testing detach-disk, we need to attach certain device first.
     if test_cmd == "detach-disk" and no_attach != "yes":
-        if bus_type == "ide" and vm.is_alive():
-            vm.destroy(gracefully=False)
         s_attach = virsh.attach_disk(vm_name, device_source, device_target,
                                      "--driver qemu --config").exit_status
         if s_attach != 0:
             logging.error("Attaching device failed before testing detach-disk")
-        if vm.is_dead():
-            vm.start()
+
+        if test_twice:
+            device_target2 = params.get("at_dt_disk_device_target2",
+                                        device_target)
+            create_device_file(device_source)
+            s_attach = virsh.attach_disk(vm_name, device_source, device_target2,
+                                         "--driver qemu --config").exit_status
+            if s_attach != 0:
+                logging.error("Attaching device failed before testing "
+                              "detach-disk test_twice")
+
+    vm.start()
+    vm.wait_for_login()
+
+    # Add acpiphp module before testing if VM's os type is rhle5.*
+    if not acpiphp_module_modprobe(vm, os_type):
+        raise error.TestError("Add acpiphp module failed before test.")
 
     # Turn VM into certain state.
     if pre_vm_state == "paused":
@@ -184,19 +202,24 @@ def run_virsh_attach_detach_disk(test, params, env):
 
     if test_cmd == "attach-disk":
         status = virsh.attach_disk(vm_ref, device_source, device_target,
-                                       at_options, debug=True).exit_status
+                                   at_options, debug=True).exit_status
     elif test_cmd == "detach-disk":
         status = virsh.detach_disk(vm_ref, device_target, dt_options,
-                                                  debug=True).exit_status
+                                   debug=True).exit_status
     if test_twice:
         device_target2 = params.get("at_dt_disk_device_target2", device_target)
         create_device_file(device_source)
         if test_cmd == "attach-disk":
             status = virsh.attach_disk(vm_ref, device_source,
-                            device_target2, at_options,debug=True).exit_status
+                                       device_target2, at_options, debug=True).exit_status
         elif test_cmd == "detach-disk":
             status = virsh.detach_disk(vm_ref, device_target2, dt_options,
-                                                      debug=True).exit_status
+                                       debug=True).exit_status
+
+    # Resume guest after command. On newer libvirt this is fixed as it has
+    # been a bug. The change in xml file is done after the guest is resumed.
+    if pre_vm_state == "paused":
+        vm.resume()
 
     # Check disk count after command.
     check_count_after_cmd = True
@@ -209,9 +232,7 @@ def run_virsh_attach_detach_disk(test, params, env):
             check_count_after_cmd = False
 
     # Recover VM state.
-    if pre_vm_state == "paused":
-        vm.resume()
-    elif pre_vm_state == "shut off":
+    if pre_vm_state == "shut off":
         vm.start()
 
     # Check in VM after command.
@@ -248,31 +269,32 @@ def run_virsh_attach_detach_disk(test, params, env):
         if status != 0:
             raise error.TestFail("virsh %s failed." % test_cmd)
         if test_cmd == "attach-disk":
-            if not check_count_after_cmd:
-                raise error.TestFail("Cannot see deivce in xml file"
-                                      " after attach.")
-            if not check_vm_after_cmd:
-                raise error.TestFail("Cannot see deivce in VM after attach.")
             if at_options.count("config"):
                 if not check_count_after_shutdown:
-                    raise error.TestFail("Cannot see config attached "
-                                    "device in xml file after VM shutdown.")
+                    raise error.TestFail("Cannot see config attached device "
+                                         "in xml file after VM shutdown.")
             else:
+                if not check_count_after_cmd:
+                    raise error.TestFail("Cannot see device in xml file"
+                                         " after attach.")
+                if not check_vm_after_cmd:
+                    raise error.TestFail("Cannot see device in VM after"
+                                         " attach.")
                 if check_count_after_shutdown:
-                    raise error.TestFail("See non-config attached deivce"
-                                            "in xml file after VM shutdown.")
+                    raise error.TestFail("See non-config attached device "
+                                         "in xml file after VM shutdown.")
         elif test_cmd == "detach-disk":
-            if check_count_after_cmd:
-                raise error.TestFail("See deivce in xml file after detach.")
-            if check_vm_after_cmd:
-                raise error.TestFail("See deivce in VM after detach.")
             if dt_options.count("config"):
                 if check_count_after_shutdown:
-                    raise error.TestFail("See config detached device in"
-                                             " xml file after VM shutdown.")
+                    raise error.TestFail("See config detached device in "
+                                         "xml file after VM shutdown.")
             else:
+                if check_count_after_cmd:
+                    raise error.TestFail("See device in xml file after detach.")
+                if check_vm_after_cmd:
+                    raise error.TestFail("See device in VM after detach.")
                 if not check_count_after_shutdown:
-                    raise error.TestFail("Cannot see non-config detached"
-                                     " device in xml file after VM shutdown.")
+                    raise error.TestFail("Cannot see non-config detached "
+                                         "device in xml file after VM shutdown.")
         else:
             raise error.TestError("Unknown command %s." % test_cmd)

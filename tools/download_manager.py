@@ -16,9 +16,13 @@ Downloads blobs defined in assets. Assets are .ini files that contain the
     uncompress_cmd (optionl) = Command that needs to be executed with the
         compressed file as a parameter
 
-@copyright: Red Hat 2012
+:copyright: Red Hat 2012
 """
-import glob, os, sys, logging, time
+import glob
+import os
+import sys
+import logging
+import time
 import common
 from autotest.client.shared import logging_manager
 from virttest import asset, utils_misc
@@ -39,7 +43,7 @@ def download_assets():
                 logging.info("    %s = %s" % (k, asset_info[k]))
             logging.info("")
     indexes = raw_input("%s INFO | Type the index for the assets you want to "
-                        "download (comma separated): " %
+                        "download (comma separated, Ctrl+C to abort): " %
                         time.strftime("%H:%M:%S", time.localtime()))
 
     index_list = []
@@ -59,4 +63,9 @@ def download_assets():
 
 if __name__ == "__main__":
     logging_manager.configure_logging(utils_misc.VirtLoggingConfig())
-    download_assets()
+    try:
+        download_assets()
+    except KeyboardInterrupt:
+        print
+        logging.info("Aborting...")
+        sys.exit(0)

@@ -1,6 +1,7 @@
 import re
 from autotest.client.shared import error
-from virttest import libvirt_vm, remote, virsh
+from virttest import libvirt_vm, remote, virsh, utils_libvirtd
+
 
 def run_virsh_domstate(test, params, env):
     """
@@ -30,11 +31,11 @@ def run_virsh_domstate(test, params, env):
         vm_ref = params.get(vm_ref)
     elif vm_ref == "name":
         vm_ref = "%s %s" % (vm_name, params.get("domstate_extra"))
-    elif  vm_ref == "uuid":
+    elif vm_ref == "uuid":
         vm_ref = domuuid
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     if vm_ref == "remote":
         remote_ip = params.get("remote_ip", "REMOTE.EXAMPLE.COM")
@@ -59,11 +60,11 @@ def run_virsh_domstate(test, params, env):
         status = result.exit_status
         output = result.stdout
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0:
             raise error.TestFail("Run successfully with wrong command!")
@@ -72,5 +73,5 @@ def run_virsh_domstate(test, params, env):
             raise error.TestFail("Run failed with right command")
         if vm_ref == "remote":
             if not (re.match("running", output) or re.match("blocked", output)
-                 or re.match("idle", output)):
+                    or re.match("idle", output)):
                 raise error.TestFail("Run failed with right command")

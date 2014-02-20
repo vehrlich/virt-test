@@ -1,4 +1,6 @@
-import os, logging, re
+import os
+import logging
+import re
 from autotest.client.shared import error
 from virttest import utils_test, utils_misc
 
@@ -19,9 +21,9 @@ def run_cpu_hotplug(test, params, env):
     8) Run the CPU Hotplug test suite shipped with autotest inside guest
        (Linux guest only)
 
-    @param test: QEMU test object.
-    @param params: Dictionary with test parameters.
-    @param env: Dictionary with the test environment.
+    :param test: QEMU test object.
+    :param params: Dictionary with test parameters.
+    :param env: Dictionary with the test environment.
     """
     error.context("boot the vm, with '-smp X,maxcpus=Y' option,"
                   "thus allow hotplug vcpu", logging.info)
@@ -35,6 +37,7 @@ def run_cpu_hotplug(test, params, env):
     maxcpus = int(params.get("maxcpus", 160))
     current_cpus = int(params.get("smp", 1))
     onoff_iterations = int(params.get("onoff_iterations", 20))
+    cpu_hotplug_cmd = params['cpu_hotplug_cmd']
 
     if n_cpus_add + current_cpus > maxcpus:
         logging.warn("CPU quantity more than maxcpus, set it to %s", maxcpus)
@@ -49,7 +52,7 @@ def run_cpu_hotplug(test, params, env):
 
     for i in range(current_cpus, total_cpus):
         error.context("hot-pluging vCPU %s" % i, logging.info)
-        vm.monitor.send_args_cmd("cpu_set %s online" % i)
+        vm.monitor.send_args_cmd(cpu_hotplug_cmd % i)
 
     output = vm.monitor.send_args_cmd("info cpus")
     logging.debug("Output of info CPUs:\n%s", output)
@@ -63,7 +66,7 @@ def run_cpu_hotplug(test, params, env):
     error.context("hotplugging finished, let's wait a few sec and"
                   " check CPUs quantity in guest.", logging.info)
     if not utils_misc.wait_for(lambda: utils_misc.check_if_vm_vcpu_match(
-                                                              total_cpus, vm),
+                               total_cpus, vm),
                                60 + total_cpus, first=10,
                                step=5.0, text="retry later"):
         raise error.TestFail("CPU quantity mismatch cmd after hotplug !")
@@ -97,7 +100,7 @@ def run_cpu_hotplug(test, params, env):
     timeout = int(params.get("cpu_hotplug_timeout", 300))
     error.context("running cpu_hotplug autotest after cpu addition")
     utils_test.run_autotest(vm, session, control_path, timeout,
-                                 test.outputdir, params)
+                            test.outputdir, params)
 
     # Last, but not least, let's offline/online the CPUs in the guest
     # several times

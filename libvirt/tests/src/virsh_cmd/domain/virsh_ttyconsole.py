@@ -17,12 +17,11 @@ def xml_console_recover(vmxml):
     """
     Recover older xml config with backup vmxml.
     """
-    try:
-        vmxml.undefine()
-        vmxml.define()
+    vmxml.undefine()
+    if vmxml.define():
         return True
-    except xcepts.LibvirtXMLError, detail:
-        logging.error("Recover older serial failed:%s.", detail)
+    else:
+        logging.error("Recover older serial failed:%s.", vmxml.get('xml'))
         return False
 
 
@@ -94,7 +93,7 @@ def run_virsh_ttyconsole(test, params, env):
         vm.destroy()
     xml_console_recover(vmxml_backup)
 
-    #check status_error
+    # check status_error
     status_error = params.get("status_error")
     if status_error == "yes":
         if status == 0:

@@ -1,7 +1,10 @@
-import logging, os, re
+import logging
+import os
+import time
 from autotest.client import utils
 from autotest.client.shared import error
-from virttest import utils_test, utils_net
+from virttest import utils_test, utils_net, aexpect
+
 
 @error.context_aware
 def run_nic_promisc(test, params, env):
@@ -12,14 +15,14 @@ def run_nic_promisc(test, params, env):
     2) Repeatedly enable/disable promiscuous mode in guest.
     3) Transfer file between host and guest during nic promisc on/off
 
-    @param test: QEMU test object.
-    @param params: Dictionary with the test parameters.
-    @param env: Dictionary with test environment.
+    :param test: QEMU test object.
+    :param params: Dictionary with the test parameters.
+    :param env: Dictionary with test environment.
     """
     def set_nic_promisc_onoff(session):
         if os_type == "linux":
-            session.cmd("ip link set %s promisc on" % ethname)
-            session.cmd("ip link set %s promisc off" % ethname)
+            session.cmd_output_safe("ip link set %s promisc on" % ethname)
+            session.cmd_output_safe("ip link set %s promisc off" % ethname)
         else:
             cmd = "c:\\set_win_promisc.py"
             session.cmd(cmd)
@@ -54,7 +57,5 @@ def run_nic_promisc(test, params, env):
         raise
     else:
         transfer_thread.join()
-        if session_serial:
-            session_serial.close()
         if session:
             session.close()

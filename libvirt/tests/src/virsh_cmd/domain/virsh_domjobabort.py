@@ -1,6 +1,8 @@
-import os, subprocess
+import os
+import subprocess
 from autotest.client.shared import error
 from virttest import virsh
+
 
 def run_virsh_domjobabort(test, params, env):
     """
@@ -36,33 +38,36 @@ def run_virsh_domjobabort(test, params, env):
         """
         Execute background virsh command, return subprocess w/o waiting for exit()
 
-        @param: cmd : virsh command.
-        @param: guest_name : VM's name
-        @param: file_source : virsh command's file option.
+        :param cmd : virsh command.
+        :param guest_name : VM's name
+        :param file_source : virsh command's file option.
         """
         if action == "managedsave":
             file = ""
         command = "virsh %s %s %s" % (action, vm_name, file)
-        p = subprocess.Popen(command,shell=True, stdout=subprocess.PIPE,
+        p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         return p
 
-
-    action = params.get("jobabort_action","dump")
+    action = params.get("jobabort_action", "dump")
     status_error = params.get("status_error", "no")
     job = params.get("jobabort_job", "yes")
     tmp_file = os.path.join(test.tmpdir, "domjobabort.tmp")
+    tmp_pipe = os.path.join(test.tmpdir, "domjobabort.fifo")
     vm_ref = params.get("jobabort_vm_ref")
+    saved_data = None
+
+    if action == "managedsave":
+        tmp_pipe = '/var/lib/libvirt/qemu/save/%s.save' % vm.name
 
     if action == "restore":
         virsh.save(vm_name, tmp_file, ignore_status=True)
-
 
     if vm_ref == "id":
         vm_ref = domid
     elif vm_ref == "hex_id":
         vm_ref = hex(int(domid))
-    elif  vm_ref == "uuid":
+    elif vm_ref == "uuid":
         vm_ref = domuuid
     elif vm_ref.find("invalid") != -1:
         vm_ref = params.get(vm_ref)
@@ -73,11 +78,36 @@ def run_virsh_domjobabort(test, params, env):
     # The command's effect is to abort the currently running domain job.
     # So before do "domjobabort" action, we must create a job on the domain.
     process = None
-    if job == "yes" and start_vm == "yes":
-        process = get_subprocess(action, vm_name, tmp_file)
+    if job == "yes" and start_vm == "yes" and status_error == "no":
+        if os.path.exists(tmp_pipe):
+            os.unlink(tmp_pipe)
+        os.mkfifo(tmp_pipe)
+
+        process = get_subprocess(action, vm_name, tmp_pipe)
+
+        saved_data = None
+        if action == "restore":
+            saved_data = file(tmp_file, 'r').read(10 * 1024 * 1024)
+            f = open(tmp_pipe, 'w')
+            f.write(saved_data[:1024 * 1024])
+        else:
+            f = open(tmp_pipe, 'r')
+            dummy = f.read(1024 * 1024)
 
     ret = virsh.domjobabort(vm_ref, ignore_status=True)
     status = ret.exit_status
+
+    if process:
+        if saved_data:
+            f.write(saved_data[1024 * 1024:])
+        else:
+            dummy = f.read()
+        f.close()
+
+        if os.path.exists(tmp_pipe):
+            os.unlink(tmp_pipe)
+        if os.path.exists(tmp_file):
+            os.unlink(tmp_file)
 
     # Recover the environment.
     if pre_vm_state == "suspend":
@@ -89,7 +119,7 @@ def run_virsh_domjobabort(test, params, env):
             except OSError:
                 pass
 
-    #check status_error
+    # check status_error
     if status_error == "yes":
         if status == 0:
             raise error.TestFail("Run successfully with wrong command!")

@@ -1,5 +1,5 @@
 from autotest.client.shared import error
-from virttest import remote, libvirt_vm, virsh
+from virttest import remote, libvirt_vm, virsh, utils_libvirtd
 
 
 def run_virsh_shutdown(test, params, env):
@@ -24,7 +24,7 @@ def run_virsh_shutdown(test, params, env):
     vm_ref = params.get("shutdown_vm_ref")
     libvirtd = params.get("libvirtd", "on")
 
-    #run test case
+    # run test case
     if vm_ref == "id":
         vm_ref = domid
     elif vm_ref == "hex_id":
@@ -37,14 +37,17 @@ def run_virsh_shutdown(test, params, env):
         vm_ref = domuuid
 
     if libvirtd == "off":
-        libvirt_vm.libvirtd_stop()
+        utils_libvirtd.libvirtd_stop()
 
     if vm_ref != "remote":
-        status = virsh.shutdown(vm_ref, ignore_status = True).exit_status
+        status = virsh.shutdown(vm_ref, ignore_status=True).exit_status
     else:
-        remote_ip = params.get("remote_ip", None)
+        remote_ip = params.get("remote_ip", "REMOTE.EXAMPLE.COM")
         remote_pwd = params.get("remote_pwd", None)
-        local_ip = params.get("local_ip", None)
+        local_ip = params.get("local_ip", "LOCAL.EXAMPLE.COM")
+        if remote_ip.count("EXAMPLE.COM") or local_ip.count("EXAMPLE.COM"):
+            raise error.TestNAError(
+                "Remote test parameters unchanged from default")
         status = 0
         try:
             remote_uri = libvirt_vm.complete_uri(local_ip)
@@ -57,11 +60,11 @@ def run_virsh_shutdown(test, params, env):
         except error.CmdError:
             status = 1
 
-    #recover libvirtd service start
+    # recover libvirtd service start
     if libvirtd == "off":
-        libvirt_vm.libvirtd_start()
+        utils_libvirtd.libvirtd_start()
 
-    #check status_error
+    # check status_error
     status_error = params.get("status_error")
     if status_error == "yes":
         if status == 0:

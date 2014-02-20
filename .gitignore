@@ -16,6 +16,7 @@
 *.so
 .settings
 shared/data
+shared/deps/cpuid_test_kernel/cpuid_dump_kernel.bin
 qemu/env
 logs
 qemu/unittests
@@ -34,6 +35,8 @@ libvirt/cfg/machines.cfg
 libvirt/cfg/subtests.cfg
 libvirt/cfg/virtio-win.cfg
 libvirt/env
+lvsb/cfg/subtests.cfg
+lvsb/env
 v2v/cfg/base.cfg
 v2v/cfg/cdkeys.cfg
 v2v/cfg/guest-hw.cfg
@@ -55,7 +58,7 @@ libguestfs/cfg/guest-os.cfg
 libguestfs/cfg/machines.cfg
 libguestfs/cfg/subtests.cfg
 libguestfs/cfg/virtio-win.cfg
-tools/github/*.cache
+tools/github/*cache
 tmp
 .*.swp
 RELEASE-VERSION
