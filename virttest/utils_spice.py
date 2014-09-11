@@ -25,6 +25,12 @@ def _is_pid_alive(session, pid):
 
     return True
 
+def load_kernel_module(session, module):
+    try:
+        session.cmd_status("modprobe %s" % module)
+    except ShellCmdError:
+        logging.info("Failed to load kernel module: %s" %s)
+        return False
 
 def wait_timeout(timeout=10):
     """
@@ -43,7 +49,7 @@ def kill_app(vm_name, app_name, params, env):
     :params vm_name - VM name in parameters
     :params app_name - name of application
     """
-    vm = env.get_vm(params[vm_name])
+    vm = env.get_vm(vm_name)
 
     vm.verify_alive()
     vm_session = vm.wait_for_login(
@@ -51,8 +57,14 @@ def kill_app(vm_name, app_name, params, env):
 
     logging.info("Try to kill %s", app_name)
     if vm.params.get("os_type") == "linux":
-        vm_session.cmd("pkill %s" % app_name
-                       .split(os.path.sep)[-1])
+        try:
+            output = vm_session.cmd_output("pkill %s" % app_name
+                                    .split(os.path.sep)[-1])
+        except:
+            if output == 1:
+                pass
+            else:
+                raise
     elif vm.params.get("os_type") == "windows":
         vm_session.cmd_output("taskkill /F /IM %s" % app_name
                         .split('\\')[-1])
@@ -309,6 +321,7 @@ def clear_interface_linux(vm, login_timeout, timeout):
         session.cmd("ps -C %s" % command)
     except:
         raise error.TestFail("X/gdm not running")
+        #logging.info("X or gdm is not running; might cause failures")
 
 def clear_interface_windows(vm, login_timeout, timeout):
     session = vm.wait_for_login()
