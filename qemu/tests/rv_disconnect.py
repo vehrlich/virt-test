@@ -19,14 +19,5 @@ def run_rv_disconnect(test, params, env):
     :param params: Dictionary with the test parameters.
     :param env: Dictionary with test environment.
     """
-    kill_on_vms = params.get("kill_on_vms", "")
-    vms = kill_on_vms.split(',')
-    app_name = params.get("rv_binary", None)
-    logging.debug("vms %s", vms)
-    if not vms:
-        raise error.TestFail("Kill app test launched without any VM parameter")
-    else:
-        for vm in vms:
-            logging.debug("vm %s", vm)
-            if params.has_key(vm):
-                utils_spice.kill_app(vm, app_name, params, env)
+    logging.debug("Killing remote-viewer on client")
+    utils_spice.kill_app(params.get("client_vm"), params.get("rv_binary"), params, env)
