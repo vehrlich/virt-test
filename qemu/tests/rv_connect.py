@@ -253,7 +253,7 @@ def launch_rv(client_vm, guest_vm, params):
 
     if not params.get("rv_verify") == "only":
         try:
-            client_session.cmd(cmd)
+            logging.info("spice,connection: %s", client_session.cmd(cmd))
         except ShellStatusError:
             logging.debug("Ignoring a status exception, will check connection"
                       "of remote-viewer later")
