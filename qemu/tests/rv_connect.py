@@ -279,6 +279,7 @@ def launch_rv(client_vm, guest_vm, params):
         utils_spice.wait_timeout(5)  # Wait for conncetion to establish
 
     is_rv_connected = True
+
     try:
         utils_spice.verify_established(client_vm, host_ip,
                                        host_port, rv_binary,
@@ -349,7 +350,6 @@ def run_rv_connect(test, params, env):
         timeout=int(params.get("login_timeout", 360)))
 
     client_vm = env.get_vm(params["client_vm"])
-
     client_vm.verify_alive()
     client_session = client_vm.wait_for_login(
         timeout=int(params.get("login_timeout", 360)))

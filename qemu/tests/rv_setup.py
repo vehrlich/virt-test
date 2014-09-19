@@ -12,28 +12,30 @@ Requires: the client and guest VMs to be setup.
 
 import logging, os
 from os import system, getcwd, chdir
-from virttest import utils_spice
+from virttest import utils_misc, utils_spice
 
 def install_rpm(session, name, rpm):
     """
-installs dogtail on a VM
+    installs dogtail on a VM
 
-@param session: cmd session of a VM
-@rpm: rpm to be installed
-@name name of the package
-"""
+    @param session: cmd session of a VM
+    @rpm: rpm to be installed
+    @name name of the package
+    
+    """
     logging.info("Installing " + name + " from: " + rpm)
-    session.cmd("yum -y localinstall %s" % rpm, timeout = 240)
+    session.cmd("yum -y localinstall %s" % rpm, timeout = 480)
     if session.cmd_status("rpm -q " + name):
         raise Exception("Failed to install " + name)
 
 def deploy_tests_linux(vm, params):
     """
-Moves the dogtail tests to a vm
+    Moves the dogtail tests to a vm
 
-@param vm: a VM
-@param params: dictionary of paramaters
-"""
+    @param vm: a VM
+    @param params: dictionary of paramaters
+    """
+
     logging.info("Deploying tests")
     script_location = params.get("test_script_tgt")
     old = getcwd()
@@ -54,7 +56,7 @@ Moves the dogtail tests to a vm
 
 def setup_gui_linux(vm, params, env):
     """
-Setup the vm for GUI testing, install dogtail & move tests over.
+    Setup the vm for GUI testing, install dogtail & move tests over.
 
 @param vm: a VM
 @param params: dictionary of test paramaters
@@ -100,27 +102,82 @@ def setup_vm_linux(vm, params, env):
             setup_gui_linux(vm, params, env)
         elif setup_type == "audio":
             setup_loopback_linux(vm, params)
+        else:
+            raise error.TestFail("No setup_type specified")
 
 def setup_vm_windows(vm, params, env):
     if params.get("display", None) == "vnc":
         logging.info("Display of VM is VNC; assuming it is client")
         utils_spice.install_rv_win(vm, params.get("rv_installer"), env)
         utils_spice.install_usbclerk_win(vm, params.get("usb_installer"), env)
+    else:
+        logging.info("Setting up Windows guest")
+        winqxl = params.get("winqxl")
+        winvdagent = params.get("winvdagent")
+        vioserial = params.get("vioserial")
+        winp7 = params.get("winp7zip")
+        guest_script_req = params.get("guest_script_req")
+        guest_sr_dir = os.path.join("scripts", guest_script_req)
+        guest_sr_path = utils_misc.get_path(test.virtdir, guest_sr_dir)
+        winp7_path = os.path.join(test.virtdir, 'deps', winp7)
+        winqxlzip = os.path.join(test.virtdir, 'deps', winqxl)
+        winvdagentzip = os.path.join(test.virtdir, 'deps', winvdagent)
+        vioserialzip = os.path.join(test.virtdir, 'deps', vioserial)
+        #copy p7zip to windows and install it silently
+        logging.info("Installing 7zip")
+        vm.copy_files_to(winp7_path, "C:\\")
+        session.cmd_status("start /wait msiexec /i C:\\7z920-x64.msi /qn") 
+
+        #copy over the winqxl, winvdagent, virtio serial 
+        vm.copy_files_to(winqxlzip, "C:\\")
+        vm.copy_files_to(winvdagentzip, "C:\\")
+        vm.copy_files_to(vioserialzip, "C:\\")
+        vm.copy_files_to(guest_sr_path, "C:\\")
+
+        #extract winvdagent zip and start service
+        logging.info("Installing vdagent")
+        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wvdagent.zip -oC:\\')
+        session.cmd_status("C:\\vdservice.exe install")
+        #wait for vdservice to come up
+        utils_spice.wait_timeout(5)
+        output = session.cmd("net start vdservice")
+	logging.info("Vdservice status: %s" % output)
+
+        #extract winqxl driver, place drivers in correct location & reboot
+        #Note pnputil only works win 7+, need to find a way for win xp
+	logging.info("Installing vioser")
+        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\vioserial.zip -oC:\\')
+        output = session.cmd("C:\\Windows\\winsxs\\amd64_microsoft-windows-pnputil_31bf3856ad364e35_6.1.7600.16385_none_5958b438d6388d15\\PnPutil.exe -i -a C:\\vioser.inf")
+        #Make sure virtio install is complete
+	logging.info("VirtIO serial status: %s" % output)
+        utils_spice.wait_timeout(5)
+
+        #winqxl
+	logging.info("Installing qxl")
+        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wqxl.zip -oC:\\')
+        output = session.cmd("C:\\Windows\\winsxs\\amd64_microsoft-windows-pnputil_31bf3856ad364e35_6.1.7600.16385_none_5958b438d6388d15\\PnPutil.exe -i -a C:\\qxl.inf")
+        logging.info("Win QXL status: %s" % output)
+        #Make sure qxl install is complete
+        utils_spice.wait_timeout(5)
+        vm.reboot()
+
 
 def setup_vm(vm, params, env):
     if params.get("os_type") == "linux":
         setup_vm_linux(vm, params, env)
     elif params.get("os_type") == "windows":
         setup_vm_windows(vm,params, env)
+    else:
+        raise error.TestFail("Unsupported OS.")
 
 def run_rv_setup(test, params, env):
     """
-Setup the VMs for remote-viewer testing
+    Setup the VMs for remote-viewer testing
 
-@param test: QEMU test object.
-@param params: Dictionary with the test parameters.
-@param env: Dictionary with test environment.
-"""
+    @param test: QEMU test object.
+    @param params: Dictionary with the test parameters.
+    @param env: Dictionary with test environment.
+    """
 
     for vm in params.get("vms").split():
         logging.info("Setting up VM: " + vm)
