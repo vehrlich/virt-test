@@ -390,6 +390,7 @@ def verify_paste_successful(session_to_paste_to, testing_text, interpreter,
     @param test_timeout: timeout time for the cmd
     """
     cmd = "%s %s" % (interpreter, script_call)
+    #session_to_paste_to.cmd("export DISPLAY=:0")
     try:
         logging.debug("------------ Script output ------------")
         output = session_to_paste_to.cmd(cmd, print_func=logging.info,
@@ -429,7 +430,7 @@ def copy_and_paste_neg(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     testing_text = params.get("text_to_test")
     guest_os = params.get("os_type")
     copyfrom_script_call = ""
@@ -480,7 +481,7 @@ def copy_and_paste_pos(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     testing_text = params.get("text_to_test")
     copyfrom_script_call = ""
     pasteto_script_call = ""
@@ -491,7 +492,8 @@ def copy_and_paste_pos(session_to_copy_from, session_to_paste_to,
         pasteto_script_call = script_call_guest
     elif(dirparam == "guest_to_client"):
         copyfrom_script_call = script_call_guest
-        pasteto_script_call = script_call_client
+        pasteto_script_call = script_call_client 
+
 
     # Before doing the copy and paste, verify vdagent is
     # installed and the daemon is running on the guest
@@ -530,7 +532,7 @@ def restart_cppaste(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     testing_text = params.get("text_to_test")
     copyfrom_script_call = ""
     pasteto_script_call = ""
@@ -595,7 +597,7 @@ def copy_and_paste_cpdisabled_neg(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     testing_text = params.get("text_to_test")
     copyfrom_script_call = ""
     pasteto_script_call = ""
@@ -642,7 +644,7 @@ def copy_and_paste_largetext(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     copyfrom_script_call = ""
     pasteto_script_call = ""
     copyfrom_path = ""
@@ -715,7 +717,7 @@ def restart_cppaste_lrgtext(session_to_copy_from, session_to_paste_to,
     dst_path_client = params.get("dst_dir_client", "client_script")
     dst_path_guest = params.get("dst_dir_guest", "guest_script")
     script_call_guest = dst_path_guest + guest_script
-    script_call_client = os.path.join(dst_path_client, client_script)
+    script_call_client = dst_path_client + client_script
     copyfrom_script_call = ""
     pasteto_script_call = ""
     copyfrom_path = ""
@@ -1115,7 +1117,6 @@ def run_rv_copyandpaste(test, params, env):
     logging.info("Transferring the clipboard script to client & guest,"
                  "destination directory: %s, source script location: %s",
                  dst_path_client, script_path_client)
-
     client_vm.copy_files_to(script_path_client, dst_path_client, timeout=60)
     guest_vm.copy_files_to(script_path_guest, dst_path_guest, timeout=60)
 
@@ -1151,13 +1152,11 @@ def run_rv_copyandpaste(test, params, env):
 
     # Verify that gnome is now running on the guest
     if guest_ostype == "linux":
+        guest_session.cmd("export DISPLAY=:0.0")
         try:
             guest_session.cmd("ps aux | grep -v grep | grep gnome-session")
         except aexpect.ShellCmdError:
             raise error.TestWarn("gnome-session probably not correctly started")
-
-        guest_session.cmd("export DISPLAY=:0.0")
-
 
     # Make sure the clipboards are clear before starting the test
     clear_cb(guest_session, params)
