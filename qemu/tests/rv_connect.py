@@ -222,7 +222,8 @@ def launch_rv(client_vm, guest_vm, params):
     # Launching the actual set of commands
     try:
         if rv_ld_library_path:
-            print_rv_version(client_session, "LD_LIBRARY_PATH=/usr/local/lib " + rv_binary)
+            print_rv_version(client_session, "LD_LIBRARY_PATH=/usr/local/lib " +
+                             rv_binary)
         else:
             print_rv_version(client_session, rv_binary)
 
