@@ -112,9 +112,12 @@ def setup_vm_windows(vm, params, env):
         utils_spice.install_usbclerk_win(vm, params.get("usb_installer"), env)
     else:
         logging.info("Setting up Windows guest")
+        session = vm.wait_for_login(
+                             timeout = int(params.get("login_timeout", 360)))
         winqxl = params.get("winqxl")
         winvdagent = params.get("winvdagent")
         vioserial = params.get("vioserial")
+        pnputil = params.get("pnputil")
         winp7 = params.get("winp7zip")
         guest_script_req = params.get("guest_script_req")
         md5sumwin = params.get("md5sumwin")
@@ -138,34 +141,44 @@ def setup_vm_windows(vm, params, env):
         vm.copy_files_to(guest_sr_path, "C:\\")
         vm.copy_files_to(md5sumwin_path, "C:\\")
         
-        #extract winvdagent zip and start service
-        logging.info("Installing vdagent")
-        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wvdagent.zip -oC:\\')
-        utils_spice.wait_timeout(2)
-        session.cmd_status("C:\\vdservice.exe install")
-        #wait for vdservice to come up
-        utils_spice.wait_timeout(5)
-        output = session.cmd("net start vdservice")
-	logging.info("Vdservice status: %s" % output)
+        #extract winvdagent zip and start service if vdservice is not installed
+        try:
+            output = session.cmd('sc queryex type= service state= all' +
+                                 ' | FIND "vdservice"')
+        except ShellCmdError:
+            session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wvdagent.zip -oC:\\')
+            utils_spice.wait_timeout(2)
+            session.cmd_status("C:\\vdservice.exe install")
+            #wait for vdservice to come up
+            utils_spice.wait_timeout(5)
+            logging.info(session.cmd("net start vdservice")) 
+            logging.info(session.cmd("chdir"))
 
         #extract winqxl driver, place drivers in correct location & reboot
         #Note pnputil only works win 7+, need to find a way for win xp
-	logging.info("Installing vioser")
-        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\vioserial.zip -oC:\\')
-        output = session.cmd("C:\\Windows\\winsxs\\amd64_microsoft-windows-pnputil_31bf3856ad364e35_6.1.7600.16385_none_5958b438d6388d15\\PnPutil.exe -i -a C:\\vioser.inf")
-        #Make sure virtio install is complete
-	logging.info("VirtIO serial status: %s" % output)
-        utils_spice.wait_timeout(5)
-
-        #winqxl
-	logging.info("Installing qxl")
-        session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wqxl.zip -oC:\\')
-        output = session.cmd("C:\\Windows\\winsxs\\amd64_microsoft-windows-pnputil_31bf3856ad364e35_6.1.7600.16385_none_5958b438d6388d15\\PnPutil.exe -i -a C:\\qxl.inf")
-        logging.info("Win QXL status: %s" % output)
-        #Make sure qxl install is complete
-        utils_spice.wait_timeout(5)
+        #Verify if virtio serial is already installed
+        output = session.cmd(pnputil + " /e")
+        if("System devices" in output):
+            logging.info( "Virtio Serial already installed")
+        else:
+            session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\vioserial.zip -oC:\\')
+            output = session.cmd(pnputil + " -i -a C:\\vioser.inf")
+            logging.info("Virtio Serial status: " + output)
+            #Make sure virtio install is complete
+            utils_spice.wait_timeout(5)
+        output = session.cmd(pnputil + " /e")
+        if("Display adapters" in output):
+            logging.info("QXL already installed")
+        else:
+            #winqxl
+            session.cmd_status('"C:\\Program Files\\7-Zip\\7z.exe" e C:\\wqxl.zip -oC:\\')
+            output = session.cmd(pnputil + " -i -a C:\\qxl.inf")
+            logging.info( "Win QXL status: " + output )
+            #Make sure qxl install is complete
+            utils_spice.wait_timeout(5)
         vm.reboot()
-
+         
+        logging.info("Setup for the Windows VM is complete")
 
 def setup_vm(vm, params, env):
     if params.get("os_type") == "linux":
