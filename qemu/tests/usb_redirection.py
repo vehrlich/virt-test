@@ -84,7 +84,7 @@ def run_usb_redirection(test, params, env):
     #USB was mounted by root when tested this test. This prevents right issue
     guest_root_session.cmd("chmod 777 %s" % params["file_path"])
     #copy file from guest to USB(USB is mounted automaticaly to /media )
-    if params.get("migrate", "no") == "yes":
+    if params.get("usb_migrate", "no") == "yes":
         copy_background = utils.InterruptedThread(
                             guest_session.cmd, ("cp %s%s %s%s" % (
                             params["file_tmp_path"],
