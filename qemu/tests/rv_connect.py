@@ -46,6 +46,40 @@ def print_rv_version(client_session, rv_binary):
                  client_session.cmd(rv_binary + " --spice-gtk-version"))
 
 
+def check_usb_policy(vm, params):
+    """
+    Check USB policy in polkit file
+    returns status of grep command. If pattern is found 0 is returned. 0 in
+    python is False so negative of grep is returned
+    """
+    logging.info("Checking USB policy")
+    file_name = "/usr/share/polkit-1/actions/org.spice-space.lowlevelusbaccess.policy"
+    cmd = "grep \"<allow_any>yes\" " + file_name
+    client_root_session = vm.wait_for_login(
+            timeout=int(params.get("login_timeout", 360)),
+            username="root", password="123456")
+    usb_policy = client_root_session.cmd_status(cmd)
+
+    logging.info("Policy %s" % usb_policy)
+
+    if usb_policy:
+        return False
+    else:
+        return True
+
+def add_usb_policy(vm):
+    """
+    Add USB policy to policykit file
+    """
+    logging.info("Adding USB policy")
+    remote_file_path = "/usr/share/polkit-1/actions/org.spice-space.lowlevelusbaccess.policy"
+
+    file_to_upload = "deps/org.spice-space.lowlevelusbaccess.policy"
+    file_to_upload_path = os.path.join("deps", file_to_upload)
+    logging.debug("Sending %s" % file_to_upload_path)
+    vm.copy_files_to(file_to_upload_path, remote_file_path, username="root",
+                     password="123456")
+
 def launch_rv(client_vm, guest_vm, params):
     """
     Launches rv_binary with args based on spice configuration
@@ -182,6 +216,21 @@ def launch_rv(client_vm, guest_vm, params):
 
     else:
         raise Exception("Unsupported display value")
+
+    #usbredirection support
+    if params.get("usb_redirection_add_device_vm2") == "yes":
+        logging.info("USB redirection set auto redirect on connect for device \
+        class 0x08")
+        cmd += " --spice-usbredir-redirect-on-connect=\"0x08,-1,-1,-1,1\""
+
+        if not check_usb_policy(client_vm, params):
+            logging.info("No USB policy.")
+            add_usb_policy(client_vm)
+            utils_spice.wait_timeout(3)
+        else:
+            logging.info("USB policy OK")
+    else:
+        logging.info("No USB redirection")
 
     # Check to see if the test is using the full screen option.
     if full_screen == "yes" and not rv_parameters_from == "file" :
