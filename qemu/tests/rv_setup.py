@@ -104,6 +104,26 @@ def setup_vm_linux(vm, params, env):
             setup_loopback_linux(vm, params)
         else:
             raise error.TestFail("No setup_type specified")
+    
+    #usbredirection support
+    if params.get("usb_redirection_add_device_vm2") == "yes":
+        logging.info("USB redirection set auto redirect on connect for device"
+                     "class 0x08")
+        cmd += " --spice-usbredir-redirect-on-connect=\"0x08,-1,-1,-1,1\""
+        client_root_session = client_vm.wait_for_login(
+            timeout=int(params.get("login_timeout", 360)),
+            username="root", password="123456")
+        usb_mount_path = params.get("file_path")
+        #USB was created by qemu (root). This prevents right issue.
+        client_root_session.cmd("chown test:test %s" % usb_mount_path)
+        if not check_usb_policy(client_vm, params):
+            logging.info("No USB policy.")
+            add_usb_policy(client_vm)
+            utils_spice.wait_timeout(3)
+        else:
+            logging.info("USB policy OK")
+    else:
+        logging.info("No USB redirection")
 
 def setup_vm_windows(vm, params, env):
     if params.get("display", None) == "vnc":
